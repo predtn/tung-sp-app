@@ -12,12 +12,17 @@ export interface PatientGroup {
 export function idField(fields: FieldDef[]): FieldDef | undefined {
   return fields.find((f) => f.role === 'id');
 }
+export function visitKeyField(fields: FieldDef[]): FieldDef | undefined {
+  return fields.find((f) => f.role === 'visitkey');
+}
 export function fixedFields(fields: FieldDef[]): FieldDef[] {
   return fields.filter((f) => f.role === 'fixed');
 }
 export function varyingFields(fields: FieldDef[]): FieldDef[] {
-  // mặc định không set role -> coi là biến thiên
-  return fields.filter((f) => !f.role || f.role === 'varying');
+  // 'visitkey' và không set role đều hiển thị như cột biến thiên theo đợt
+  return fields.filter(
+    (f) => !f.role || f.role === 'varying' || f.role === 'visitkey'
+  );
 }
 
 /**
@@ -105,21 +110,17 @@ function parseNum(v: string | undefined): number | null {
   return m ? Number(m[0]) : null;
 }
 
-/** Ngày khám trùng nhau trong cùng nhóm -> có thể quét trùng file. */
+/** Khoá đợt khám trùng nhau trong cùng nhóm -> có thể quét trùng file. */
 export function duplicateVisits(
   group: PatientGroup,
   fields: FieldDef[]
 ): number[] {
-  const dateF = fields.find(
-    (f) =>
-      (!f.role || f.role === 'varying') &&
-      /ngay kham|ngày khám|ngay_kham/i.test(f.key + ' ' + f.label)
-  );
-  if (!dateF) return [];
+  const vkF = visitKeyField(fields);
+  if (!vkF) return [];
   const seen = new Map<string, number>();
   const dupIdx: number[] = [];
   group.records.forEach((r, i) => {
-    const d = (r.values[dateF.key] ?? '').trim();
+    const d = (r.values[vkF.key] ?? '').trim().toLowerCase();
     if (!d) return;
     if (seen.has(d)) dupIdx.push(i);
     else seen.set(d, i);

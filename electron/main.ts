@@ -133,7 +133,7 @@ function registerIpc() {
     async (_e, tabTitle: string, fields: FieldDef[]) => {
       const cfg = loadConfig();
       const headers = fields.map((f) => f.label);
-      headers.push('File nguồn', 'Thời gian nhập');
+      headers.push('Thời gian nhập');
       return gs.planTabSync(
         cfg.googleClientId,
         cfg.googleClientSecret,
@@ -166,7 +166,7 @@ function registerIpc() {
     async (_e, tabTitle: string, fields: FieldDef[]) => {
       const cfg = loadConfig();
       const headers = fields.map((f) => f.label);
-      headers.push('File nguồn', 'Thời gian nhập');
+      headers.push('Thời gian nhập');
       await gs.applyTabSync(
         cfg.googleClientId,
         cfg.googleClientSecret,
@@ -257,7 +257,7 @@ function registerIpc() {
     const fields = loadFields();
     saveFieldsForTab(title, fields);
     const headers = fields.map((f) => f.label);
-    headers.push('File nguồn', 'Thời gian nhập');
+    headers.push('Thời gian nhập');
     return gs.createTab(
       cfg.googleClientId,
       cfg.googleClientSecret,
@@ -273,7 +273,7 @@ function registerIpc() {
       const cfg = loadConfig();
       const fields = loadFieldsForTab(tabTitle);
       const headers = fields.map((f) => f.label);
-      headers.push('File nguồn', 'Thời gian nhập');
+      headers.push('Thời gian nhập');
 
       await gs.ensureHeaders(
         cfg.googleClientId,
@@ -286,7 +286,7 @@ function registerIpc() {
       const now = new Date().toLocaleString('vi-VN');
       const rows = records.map((r) => {
         const row = fields.map((f) => r.values[f.key] ?? '');
-        row.push(r.sourceFile, now);
+        row.push(now);
         return row;
       });
 
@@ -328,13 +328,19 @@ function validateFields(fields: FieldDef[]): FieldDef[] {
   const seen = new Set<string>();
   const cleaned: FieldDef[] = [];
   let idCount = 0;
+  let visitKeyCount = 0;
   for (const raw of fields) {
     const label = (raw.label ?? '').trim();
     const description = (raw.description ?? '').trim();
     const example = (raw.example ?? '').trim();
     const role: FieldDef['role'] =
-      raw.role === 'id' || raw.role === 'fixed' ? raw.role : 'varying';
+      raw.role === 'id' ||
+      raw.role === 'visitkey' ||
+      raw.role === 'fixed'
+        ? raw.role
+        : 'varying';
     if (role === 'id') idCount++;
+    if (role === 'visitkey') visitKeyCount++;
     if (!label) throw new Error('Mỗi trường phải có tên cột (label).');
 
     let key = (raw.key ?? '')
@@ -363,6 +369,11 @@ function validateFields(fields: FieldDef[]): FieldDef[] {
       'Chỉ được 1 trường có vai trò "Định danh" (mã bệnh nhân). Đang có ' +
         idCount +
         '.'
+    );
+  }
+  if (visitKeyCount > 1) {
+    throw new Error(
+      'Chỉ được 1 trường có vai trò "Khoá đợt khám". Đang có ' + visitKeyCount + '.'
     );
   }
   return cleaned;

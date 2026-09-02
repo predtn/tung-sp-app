@@ -1,10 +1,11 @@
 /**
  * Vai trò của trường trong hồ sơ bệnh nhân:
- * - 'id'      : định danh cố định (mã BN) — dùng làm khoá gộp các đợt khám
- * - 'fixed'   : thông tin cố định của bệnh nhân (họ tên, ngày sinh) — không đổi giữa các đợt
- * - 'varying' : chỉ số thay đổi theo từng lần khám (men gan, ngày khám, chẩn đoán)
+ * - 'id'       : định danh cố định (mã BN) — khoá gộp các đợt khám
+ * - 'visitkey' : định danh đợt khám (mã đợt / ngày khám) — cùng 'id' làm khoá chống trùng
+ * - 'fixed'    : thông tin cố định của bệnh nhân (họ tên, ngày sinh) — không đổi giữa các đợt
+ * - 'varying'  : chỉ số thay đổi theo từng lần khám (men gan, chẩn đoán)
  */
-export type FieldRole = 'id' | 'fixed' | 'varying';
+export type FieldRole = 'id' | 'visitkey' | 'fixed' | 'varying';
 
 export interface FieldDef {
   key: string;

@@ -58,7 +58,7 @@ export const DEFAULT_FIELDS: FieldDef[] = [
     label: 'Ngày khám',
     description: 'Ngày khám của đợt này, dd/mm/yyyy',
     example: '15/03/2026',
-    role: 'varying',
+    role: 'visitkey',
   },
   {
     key: 'chan_doan',

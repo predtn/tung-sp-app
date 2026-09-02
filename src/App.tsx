@@ -16,6 +16,7 @@ export default function App() {
 
   const [records, setRecords] = useState<ExtractedRecord[]>([]);
   const [processing, setProcessing] = useState(false);
+  const [importing, setImporting] = useState(false);
   const [progress, setProgress] = useState({ done: 0, total: 0 });
   const [drag, setDrag] = useState(false);
 
@@ -63,13 +64,36 @@ export default function App() {
   // bộ trường dùng để render bảng review = bộ trường của tab đích (nếu có),
   // nếu chưa chọn tab thì dùng bộ chung
   const [activeFields, setActiveFields] = useState<FieldDef[]>([]);
+
+  async function reloadActiveFields(notifyIfChanged = false) {
+    const next = selectedTab
+      ? await window.api.getFieldsForTab(selectedTab)
+      : await window.api.getFields();
+    setActiveFields((prev) => {
+      if (
+        notifyIfChanged &&
+        records.length > 0 &&
+        JSON.stringify(prev.map((f) => f.key)) !==
+          JSON.stringify(next.map((f) => f.key))
+      ) {
+        showToast(
+          'Bộ trường vừa thay đổi. Các cột mới sẽ trống ở kết quả đang có — cân nhắc "Làm lại từ đầu".'
+        );
+      }
+      return next;
+    });
+  }
+
   useEffect(() => {
-    if (selectedTab) {
-      window.api.getFieldsForTab(selectedTab).then(setActiveFields);
-    } else {
-      setActiveFields(fields);
-    }
+    reloadActiveFields();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedTab, fields]);
+
+  // quay lại màn chính từ Cài đặt -> nạp lại bộ trường (có thể vừa được sửa)
+  useEffect(() => {
+    if (view === 'main') reloadActiveFields(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view]);
 
   // Quét tối đa CONCURRENCY file cùng lúc — nhanh hơn tuần tự, vẫn tránh
   // dồn dập gây rate-limit của OpenAI. Kết quả giữ đúng thứ tự file đầu vào.
@@ -137,6 +161,7 @@ export default function App() {
   }
 
   async function doImport(good: ExtractedRecord[]) {
+    setImporting(true);
     try {
       const { appended } = await window.api.appendRows(selectedTab, good);
       showToast(`Đã import ${appended} dòng vào tab "${selectedTab}".`);
@@ -144,6 +169,8 @@ export default function App() {
       setPdfView(null);
     } catch (e: any) {
       showToast('Import thất bại: ' + (e?.message ?? e));
+    } finally {
+      setImporting(false);
     }
   }
 
@@ -175,23 +202,20 @@ export default function App() {
       return;
     }
 
-    // --- Chống trùng theo Mã BN + Ngày khám ---
+    // --- Chống trùng theo Mã BN + Khoá đợt khám ---
     const idF = activeFields.find((f) => f.role === 'id');
-    const dateF = activeFields.find(
-      (f) =>
-        (!f.role || f.role === 'varying') &&
-        /ngay kham|ngày khám|ngay_kham/i.test(f.key + ' ' + f.label)
-    );
+    const dateF = activeFields.find((f) => f.role === 'visitkey');
     let toImport = good;
     if (idF && dateF) {
       try {
         const existing = new Set(
           await window.api.existingKeys(selectedTab, idF.label, dateF.label)
         );
+        const KEY_SEP = '||';
         const norm = (s: string) => (s ?? '').trim().toLowerCase();
         const dupInSheet = good.filter((r) =>
           existing.has(
-            `${norm(r.values[idF.key])} ${norm(r.values[dateF.key])}`
+            `${norm(r.values[idF.key])}${KEY_SEP}${norm(r.values[dateF.key])}`
           )
         );
         if (dupInSheet.length > 0) {
@@ -216,9 +240,20 @@ export default function App() {
           toImport = good.filter((r) => !dupSet.has(r));
         }
       } catch (e: any) {
-        // lỗi đọc Sheet để đối chiếu -> không chặn, chỉ nhắc
-        showToast('Không đối chiếu được trùng lặp: ' + (e?.message ?? e));
+        const ok = window.confirm(
+          'Không kiểm tra được trùng lặp:\n' +
+            (e?.message ?? e) +
+            '\n\nVẫn import? (có thể tạo dòng trùng)'
+        );
+        if (!ok) return;
       }
+    } else if (idF && !dateF) {
+      const ok = window.confirm(
+        'Chưa có trường nào được đặt vai trò "Khoá đợt khám" (vd Mã đợt khám / Ngày khám).\n' +
+          'App KHÔNG kiểm tra được trùng lặp — có thể import trùng các đợt đã có.\n\n' +
+          'Vào Cài đặt → Các trường để đặt vai trò này. Vẫn import bây giờ?'
+      );
+      if (!ok) return;
     }
     if (!toImport.length) {
       showToast('Tất cả đợt khám đều đã có trong Sheet — không có gì để import.');
@@ -368,9 +403,25 @@ export default function App() {
                 </button>
               </div>
               {processing && (
-                <p>
-                  <span className="spin">⏳</span> Đang quét {progress.done}/{progress.total}…
-                </p>
+                <div className="scan-progress">
+                  <div className="scan-progress-label">
+                    <span>AI đang quét hồ sơ…</span>
+                    <span>
+                      {progress.done}/{progress.total}
+                    </span>
+                  </div>
+                  <div className="progress-track">
+                    <div
+                      className="progress-fill"
+                      style={{
+                        width:
+                          progress.total > 0
+                            ? `${(progress.done / progress.total) * 100}%`
+                            : '0%',
+                      }}
+                    />
+                  </div>
+                </div>
               )}
             </div>
 
@@ -385,9 +436,20 @@ export default function App() {
                     fields={activeFields}
                     records={records}
                     issues={validateRecords(records, activeFields)}
+                    readOnly={importing}
                     onChange={setRecords}
                     onOpenPdf={(p, name) => setPdfView({ path: p, name })}
                   />
+                  {importing && (
+                    <div className="scan-progress">
+                      <div className="scan-progress-label">
+                        <span>Đang ghi vào Google Sheet, không sửa lúc này…</span>
+                      </div>
+                      <div className="progress-track">
+                        <div className="progress-fill progress-indeterminate" />
+                      </div>
+                    </div>
+                  )}
                   <p style={{ fontSize: 13, color: '#6c757d', marginTop: 10 }}>
                     Tổng chi phí OpenAI ước tính:{' '}
                     <strong>
@@ -448,12 +510,16 @@ export default function App() {
                     <button
                       className="secondary"
                       onClick={onReset}
+                      disabled={importing}
                       style={{ marginLeft: 'auto' }}
                     >
                       ↺ Làm lại từ đầu
                     </button>
-                    <button onClick={onImport} disabled={!selectedTab}>
-                      Import
+                    <button
+                      onClick={onImport}
+                      disabled={!selectedTab || importing}
+                    >
+                      {importing ? 'Đang import…' : 'Import'}
                     </button>
                   </div>
                 )}

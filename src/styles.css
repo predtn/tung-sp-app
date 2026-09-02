@@ -91,6 +91,9 @@ th, td {
   border: 1px solid #e0e0e0; padding: 6px 8px; text-align: left; font-size: 13px;
   vertical-align: top;
 }
+/* cột dữ liệu trong bảng review đủ rộng để đọc, nhưng vẫn giãn cao khi chữ dài */
+.review-main table td { min-width: 130px; max-width: 320px; }
+.review-main table td:first-child { min-width: 30px; }
 th { background: #f0f2f5; position: sticky; top: 0; }
 td input {
   width: 100%; border: 1px solid transparent; background: transparent;
@@ -100,6 +103,32 @@ td input {
 td input:hover { background: #f0f4f8; border-color: #ced4da; }
 td input:focus { border-color: #0d6efd; background: #fff; outline: none; }
 td.uncertain input:hover { background: #fff3cd; }
+
+/* Ô nhập tự giãn cao theo nội dung — không cắt chữ */
+.auto-textarea {
+  width: 100%;
+  min-width: 90px;
+  border: 1px solid transparent;
+  background: transparent;
+  padding: 4px 5px;
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.4;
+  border-radius: 4px;
+  resize: none;
+  overflow: hidden;
+  white-space: pre-wrap;
+  word-break: break-word;
+  box-sizing: border-box;
+  display: block;
+  transition: background-color .12s ease, border-color .12s ease;
+}
+.auto-textarea:hover { background: #f0f4f8; border-color: #ced4da; }
+.auto-textarea:focus { border-color: #0d6efd; background: #fff; outline: none; }
+td.uncertain .auto-textarea { background: #fff8e1; border-color: #ffca28; }
+td.uncertain .auto-textarea:hover { background: #fff3cd; }
+td.invalid .auto-textarea { background: #fdecea; border-color: #e57373; }
+td.error .auto-textarea { background: #fdecea; }
 td.uncertain input { background: #fff8e1; border-color: #ffca28; }
 td.invalid input { background: #fdecea; border-color: #e57373; }
 td.invalid input:hover { background: #fbd7d4; }
@@ -127,6 +156,51 @@ td.error { background: #fdecea; color: #b71c1c; }
 }
 .spin { animation: spin 1s linear infinite; display: inline-block; }
 @keyframes spin { to { transform: rotate(360deg); } }
+
+/* ---- Thanh tiến trình khi AI quét ---- */
+.scan-progress { margin-top: 12px; }
+.scan-progress-label {
+  display: flex;
+  justify-content: space-between;
+  font-size: 13px;
+  color: #495057;
+  margin-bottom: 5px;
+}
+.progress-track {
+  height: 10px;
+  background: #dbe4ef;
+  border-radius: 999px;
+  overflow: hidden;
+}
+.progress-fill {
+  height: 100%;
+  background-color: #1971c2;
+  border-radius: 999px;
+  transition: width .35s ease;
+  /* sọc chuyển động cho biết đang xử lý ngay cả khi 1 bước lâu */
+  background-image: linear-gradient(
+    45deg,
+    rgba(255, 255, 255, .28) 25%, transparent 25%,
+    transparent 50%, rgba(255, 255, 255, .28) 50%,
+    rgba(255, 255, 255, .28) 75%, transparent 75%, transparent
+  );
+  background-size: 20px 20px;
+  animation: progress-stripes 0.7s linear infinite;
+}
+@keyframes progress-stripes {
+  from { background-position: 22px 0; }
+  to { background-position: 0 0; }
+}
+/* thanh không xác định % (import) — chạy qua lại */
+.progress-indeterminate {
+  width: 35% !important;
+  animation: progress-stripes 0.7s linear infinite,
+    progress-indeterminate 1.3s ease-in-out infinite;
+}
+@keyframes progress-indeterminate {
+  0% { margin-left: -35%; }
+  100% { margin-left: 100%; }
+}
 
 /* ---- Layout panel xem PDF cạnh bảng review ---- */
 .review-wrap.with-pdf {
@@ -228,14 +302,17 @@ td.error { background: #fdecea; color: #b71c1c; }
   color: #6c757d;
   text-transform: uppercase;
 }
-.pf-item input {
+.pf-item input,
+.pf-item .auto-textarea {
   padding: 6px 8px;
   border: 1px solid #ced4da;
   border-radius: 5px;
   font-size: 13px;
+  width: 100%;
 }
 .pf-item.conflict > span { color: #c0392b; }
-.pf-item.conflict input { background: #fff8e1; border-color: #ffca28; }
+.pf-item.conflict input,
+.pf-item.conflict .auto-textarea { background: #fff8e1; border-color: #ffca28; }
 
 .visits-table { width: 100%; border-collapse: collapse; }
 .visits-table th,
@@ -251,21 +328,20 @@ td.error { background: #fdecea; color: #b71c1c; }
   background: #f7f8fa;
   white-space: nowrap;
 }
-.vt-cell { display: flex; align-items: center; gap: 4px; }
-.vt-cell input {
-  width: 100%;
+.vt-cell { display: flex; align-items: flex-start; gap: 4px; }
+.vt-cell .auto-textarea {
+  min-width: 70px;
   border: 1px solid transparent;
   background: transparent;
   padding: 3px 4px;
-  font-size: 13px;
-  border-radius: 4px;
 }
-.vt-cell input:hover { background: #f0f4f8; border-color: #ced4da; }
-.vt-cell input:focus { background: #fff; border-color: #0d6efd; outline: none; }
-.visits-table td.uncertain input { background: #fff8e1; border-color: #ffca28; }
-.visits-table td.invalid input { background: #fdecea; border-color: #e57373; }
+.vt-cell .auto-textarea:hover { background: #f0f4f8; border-color: #ced4da; }
+.vt-cell .auto-textarea:focus { background: #fff; border-color: #0d6efd; outline: none; }
+.visits-table td { vertical-align: top; }
+.visits-table td.uncertain .auto-textarea { background: #fff8e1; border-color: #ffca28; }
+.visits-table td.invalid .auto-textarea { background: #fdecea; border-color: #e57373; }
 .visits-table td.error { background: #fdecea; }
-.trend { font-size: 11px; font-weight: 700; flex-shrink: 0; }
+.trend { font-size: 11px; font-weight: 700; flex-shrink: 0; margin-top: 3px; }
 
 /* ---- Chế độ xem Thẻ (khi có nhiều trường) ---- */
 .cards-grid {
@@ -326,19 +402,23 @@ td.error { background: #fdecea; color: #b71c1c; }
   text-transform: uppercase;
   letter-spacing: .02em;
 }
-.card-field input {
+.card-field input,
+.card-field .auto-textarea {
   padding: 6px 8px;
   border: 1px solid #ced4da;
   border-radius: 5px;
   font-size: 13px;
   width: 100%;
 }
-.card-field input:focus { border-color: #0d6efd; outline: none; }
-.card-field.uncertain input {
+.card-field input:focus,
+.card-field .auto-textarea:focus { border-color: #0d6efd; outline: none; }
+.card-field.uncertain input,
+.card-field.uncertain .auto-textarea {
   background: #fff8e1;
   border-color: #ffca28;
 }
-.card-field.invalid input {
+.card-field.invalid input,
+.card-field.invalid .auto-textarea {
   background: #fdecea;
   border-color: #e57373;
 }

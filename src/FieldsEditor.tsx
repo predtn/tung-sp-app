@@ -4,9 +4,11 @@ import type { TabSyncPlan } from '../electron/google';
 
 const ROLE_LABEL: Record<FieldRole, string> = {
   id: 'Định danh (mã BN)',
+  visitkey: 'Khoá đợt khám',
   fixed: 'Cố định',
   varying: 'Biến thiên',
 };
+const ROLE_ORDER: FieldRole[] = ['id', 'visitkey', 'fixed', 'varying'];
 
 interface Props {
   // bộ trường chung (khi chưa chọn tab)
@@ -138,8 +140,9 @@ export default function FieldsEditor({
     setRows((rs) =>
       rs.map((r, i) => {
         if (i === idx) return { ...r, role };
-        // chỉ 1 trường được là 'id' -> hạ các trường id khác xuống 'fixed'
-        if (role === 'id' && r.role === 'id') return { ...r, role: 'fixed' };
+        // 'id' và 'visitkey' chỉ được 1 trường -> hạ trường cũ cùng vai trò xuống 'varying'
+        if ((role === 'id' || role === 'visitkey') && r.role === role)
+          return { ...r, role: 'varying' };
         return r;
       })
     );
@@ -366,13 +369,17 @@ export default function FieldsEditor({
       <p style={{ fontSize: 12, color: '#6c757d' }}>
         <strong>Vai trò</strong> giúp app gộp nhiều đợt khám của cùng bệnh nhân:
         <br />
-        • <strong>Định danh</strong>: mã bệnh nhân (chỉ 1 trường). Các hồ sơ trùng
+        • <strong>Định danh</strong> (chỉ 1 trường): mã bệnh nhân. Các hồ sơ trùng
         mã này = cùng 1 người.
+        <br />
+        • <strong>Khoá đợt khám</strong> (chỉ 1 trường): mã đợt khám hoặc ngày
+        khám. Cùng với mã bệnh nhân, đây là cặp app dùng để <strong>chống import
+        trùng</strong>. Không đặt vai trò này thì app không kiểm tra được trùng.
         <br />
         • <strong>Cố định</strong>: không đổi giữa các đợt (họ tên, ngày sinh) —
         app cảnh báo nếu AI đọc lệch giữa các file.
         <br />• <strong>Biến thiên</strong>: thay đổi theo từng lần khám (men gan,
-        ngày khám, chẩn đoán) — app xếp cạnh nhau theo đợt để so sánh.
+        chẩn đoán) — app xếp cạnh nhau theo đợt để so sánh.
       </p>
 
       {loading ? (
@@ -418,7 +425,7 @@ export default function FieldsEditor({
                       value={f.role ?? 'varying'}
                       onChange={(e) => setRole(i, e.target.value as FieldRole)}
                     >
-                      {(['id', 'fixed', 'varying'] as FieldRole[]).map((r) => (
+                      {ROLE_ORDER.map((r) => (
                         <option key={r} value={r}>
                           {ROLE_LABEL[r]}
                         </option>

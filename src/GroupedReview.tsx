@@ -1,5 +1,6 @@
 import type { ExtractedRecord, FieldDef } from '../electron/types';
 import type { CellIssue } from './validation';
+import AutoTextarea from './AutoTextarea';
 import {
   groupByPatient,
   idField,
@@ -103,11 +104,9 @@ export default function GroupedReview({
                 {idf && (
                   <label className="pf-item">
                     <span>{idf.label}</span>
-                    <input
+                    <AutoTextarea
                       value={first.values[idf.key] ?? ''}
-                      onChange={(e) =>
-                        setFixedForGroup(g.indices, idf.key, e.target.value)
-                      }
+                      onChange={(v) => setFixedForGroup(g.indices, idf.key, v)}
                     />
                   </label>
                 )}
@@ -122,7 +121,7 @@ export default function GroupedReview({
                         {f.label}
                         {conflict && ' ⚠ lệch giữa các đợt'}
                       </span>
-                      <input
+                      <AutoTextarea
                         value={first.values[f.key] ?? ''}
                         title={
                           conflict
@@ -132,9 +131,7 @@ export default function GroupedReview({
                                 .join(' / ')
                             : ''
                         }
-                        onChange={(e) =>
-                          setFixedForGroup(g.indices, f.key, e.target.value)
-                        }
+                        onChange={(v) => setFixedForGroup(g.indices, f.key, v)}
                       />
                     </label>
                   );
@@ -187,11 +184,9 @@ export default function GroupedReview({
                             title={issue ?? ''}
                           >
                             <div className="vt-cell">
-                              <input
+                              <AutoTextarea
                                 value={r.values[f.key] ?? ''}
-                                onChange={(e) =>
-                                  setValue(gIdx, f.key, e.target.value)
-                                }
+                                onChange={(v) => setValue(gIdx, f.key, v)}
                               />
                               {trend && (
                                 <span

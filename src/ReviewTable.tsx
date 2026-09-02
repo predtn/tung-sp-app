@@ -2,12 +2,14 @@ import { useEffect, useMemo, useState } from 'react';
 import type { ExtractedRecord, FieldDef } from '../electron/types';
 import type { CellIssue } from './validation';
 import GroupedReview from './GroupedReview';
+import AutoTextarea from './AutoTextarea';
 import { idField, groupByPatient } from './grouping';
 
 interface Props {
   fields: FieldDef[];
   records: ExtractedRecord[];
   issues: CellIssue[];
+  readOnly?: boolean;
   onChange: (r: ExtractedRecord[]) => void;
   onOpenPdf: (path: string, name: string) => void;
 }
@@ -21,6 +23,7 @@ export default function ReviewTable({
   fields,
   records,
   issues,
+  readOnly = false,
   onChange,
   onOpenPdf,
 }: Props) {
@@ -73,7 +76,10 @@ export default function ReviewTable({
   }
 
   return (
-    <div>
+    <div
+      className={readOnly ? 'review-readonly' : undefined}
+      style={readOnly ? { pointerEvents: 'none', opacity: 0.6 } : undefined}
+    >
       <div
         className="row"
         style={{ justifyContent: 'flex-end', marginBottom: 10, gap: 6 }}
@@ -207,9 +213,9 @@ function TableView({
                         : ''
                     }
                   >
-                    <input
+                    <AutoTextarea
                       value={r.values[f.key] ?? ''}
-                      onChange={(e) => setValue(i, f.key, e.target.value)}
+                      onChange={(v) => setValue(i, f.key, v)}
                     />
                   </td>
                 );
@@ -289,9 +295,9 @@ function CardsView({
                     }
                   >
                     <span className="card-field-label">{f.label}</span>
-                    <input
+                    <AutoTextarea
                       value={r.values[f.key] ?? ''}
-                      onChange={(e) => setValue(i, f.key, e.target.value)}
+                      onChange={(v) => setValue(i, f.key, v)}
                     />
                     {issue && <span className="card-field-issue">{issue}</span>}
                   </label>
