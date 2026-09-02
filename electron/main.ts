@@ -144,6 +144,22 @@ function registerIpc() {
     }
   );
 
+  // Đối chiếu trùng: trả về danh sách khoá "maBN ngayKham" đã có trong tab
+  ipcMain.handle(
+    'sheets:existingKeys',
+    async (_e, tabTitle: string, headerA: string, headerB: string) => {
+      const cfg = loadConfig();
+      return gs.existingKeyPairs(
+        cfg.googleClientId,
+        cfg.googleClientSecret,
+        cfg.spreadsheetId,
+        tabTitle,
+        headerA,
+        headerB
+      );
+    }
+  );
+
   // Thực thi đồng bộ cột (ghi lại tab)
   ipcMain.handle(
     'sheets:applySync',

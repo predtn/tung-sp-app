@@ -19,6 +19,12 @@ const api = {
     ipcRenderer.invoke('fields:deleteForTab', tab),
   planTabSync: (tab: string, fields: FieldDef[]): Promise<TabSyncPlan> =>
     ipcRenderer.invoke('sheets:planSync', tab, fields),
+  existingKeys: (
+    tab: string,
+    headerA: string,
+    headerB: string
+  ): Promise<string[]> =>
+    ipcRenderer.invoke('sheets:existingKeys', tab, headerA, headerB),
   applyTabSync: (tab: string, fields: FieldDef[]): Promise<boolean> =>
     ipcRenderer.invoke('sheets:applySync', tab, fields),
 

@@ -175,8 +175,58 @@ export default function App() {
       return;
     }
 
-    const issues = validateRecords(good, activeFields);
-    const unc = countUncertain(good);
+    // --- Chống trùng theo Mã BN + Ngày khám ---
+    const idF = activeFields.find((f) => f.role === 'id');
+    const dateF = activeFields.find(
+      (f) =>
+        (!f.role || f.role === 'varying') &&
+        /ngay kham|ngày khám|ngay_kham/i.test(f.key + ' ' + f.label)
+    );
+    let toImport = good;
+    if (idF && dateF) {
+      try {
+        const existing = new Set(
+          await window.api.existingKeys(selectedTab, idF.label, dateF.label)
+        );
+        const norm = (s: string) => (s ?? '').trim().toLowerCase();
+        const dupInSheet = good.filter((r) =>
+          existing.has(
+            `${norm(r.values[idF.key])} ${norm(r.values[dateF.key])}`
+          )
+        );
+        if (dupInSheet.length > 0) {
+          const list = dupInSheet
+            .slice(0, 8)
+            .map(
+              (r) =>
+                `  - ${r.values[idF.key] || '(mã trống)'} · khám ${
+                  r.values[dateF.key] || '(ngày trống)'
+                }`
+            )
+            .join('\n');
+          const ok = window.confirm(
+            `${dupInSheet.length} đợt khám dưới đây ĐÃ CÓ trong tab "${selectedTab}" (trùng Mã BN + Ngày khám):\n\n${list}` +
+              (dupInSheet.length > 8 ? '\n  …' : '') +
+              `\n\nBấm OK để BỎ QUA các đợt trùng và chỉ import ${
+                good.length - dupInSheet.length
+              } đợt mới.\nBấm Cancel để dừng lại.`
+          );
+          if (!ok) return;
+          const dupSet = new Set(dupInSheet);
+          toImport = good.filter((r) => !dupSet.has(r));
+        }
+      } catch (e: any) {
+        // lỗi đọc Sheet để đối chiếu -> không chặn, chỉ nhắc
+        showToast('Không đối chiếu được trùng lặp: ' + (e?.message ?? e));
+      }
+    }
+    if (!toImport.length) {
+      showToast('Tất cả đợt khám đều đã có trong Sheet — không có gì để import.');
+      return;
+    }
+
+    const issues = validateRecords(toImport, activeFields);
+    const unc = countUncertain(toImport);
     const parts: string[] = [];
     if (unc.cells > 0) {
       parts.push(
@@ -198,12 +248,12 @@ export default function App() {
       const ok = window.confirm(
         `Trước khi import vào "${selectedTab}":\n\n${parts.join(
           '\n\n'
-        )}\n\nVẫn import ${good.length} dòng?`
+        )}\n\nVẫn import ${toImport.length} dòng?`
       );
       if (!ok) return;
     }
 
-    await doImport(good);
+    await doImport(toImport);
   }
 
   if (!config) return <div style={{ padding: 20 }}>Đang tải…</div>;

@@ -82,6 +82,25 @@ Mỗi trường:
 - **Tên hiển thị**: tên cột trong Google Sheet.
 - **Mô tả cho AI**: càng rõ càng chính xác (vd: "Số điện thoại liên hệ, 10 chữ số").
 - **Ví dụ** (tuỳ chọn): giá trị mẫu để AI bám định dạng, vd `15/03/1992` cho ngày.
+- **Vai trò**:
+  - **Định danh** (chỉ 1 trường): mã bệnh nhân. Hồ sơ trùng mã này = cùng 1 người.
+  - **Cố định**: không đổi giữa các đợt khám (họ tên, ngày sinh). App cảnh báo nếu AI đọc
+    lệch giữa các file.
+  - **Biến thiên**: thay đổi theo từng lần khám (men gan, ngày khám, chẩn đoán).
+
+## Xem theo bệnh nhân (nhiều đợt khám)
+
+Khi có trường **Định danh** và quét nhiều hồ sơ trùng mã BN, bảng review có thêm chế độ
+**"Theo bệnh nhân"** (bật sẵn):
+- Mỗi bệnh nhân 1 thẻ. Phần cố định (họ tên, ngày sinh…) hiện 1 lần — sửa 1 chỗ áp dụng
+  mọi đợt. Ô đỏ "⚠ lệch giữa các đợt" nếu AI đọc khác nhau.
+- Phần biến thiên xếp thành bảng ngang theo Đợt 1 / Đợt 2 / Đợt 3, kèm mũi tên ▲ (tăng)
+  ▼ (giảm) so với đợt liền trước.
+- Khi Import: mỗi đợt vẫn ghi thành 1 dòng riêng trên Sheet (long format), phần cố định
+  điền đủ cho cả các dòng.
+
+**Chống trùng**: trước khi import, app đối chiếu Mã BN + Ngày khám với dữ liệu đã có trong
+tab. Đợt khám nào đã tồn tại → hỏi và bỏ qua, chỉ import đợt mới.
 
 Lưu tại `%APPDATA%/tung-sp-app/fields.config.json` (`fields` = bộ chung, `byTab` = theo tab).
 

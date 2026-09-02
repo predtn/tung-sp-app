@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { ExtractedRecord, FieldDef } from '../electron/types';
 import type { CellIssue } from './validation';
+import GroupedReview from './GroupedReview';
+import { idField, groupByPatient } from './grouping';
 
 interface Props {
   fields: FieldDef[];
@@ -10,7 +12,7 @@ interface Props {
   onOpenPdf: (path: string, name: string) => void;
 }
 
-type ViewMode = 'table' | 'cards';
+type ViewMode = 'grouped' | 'table' | 'cards';
 
 // Nhiều trường thì bảng ngang bị bóp chật -> mặc định chuyển sang xem Thẻ.
 const CARD_THRESHOLD = 7;
@@ -22,8 +24,17 @@ export default function ReviewTable({
   onChange,
   onOpenPdf,
 }: Props) {
+  const hasId = !!idField(fields);
+  // có gộp được (>=1 nhóm nhiều đợt) thì mặc định xem Theo bệnh nhân
+  const hasMultiVisit = useMemo(
+    () =>
+      hasId &&
+      groupByPatient(records, fields).some((g) => g.records.length > 1),
+    [records, fields, hasId]
+  );
+
   const [mode, setMode] = useState<ViewMode>(
-    fields.length > CARD_THRESHOLD ? 'cards' : 'table'
+    hasMultiVisit ? 'grouped' : fields.length > CARD_THRESHOLD ? 'cards' : 'table'
   );
 
   // tra cứu nhanh: "recordIdx:fieldKey" -> thông báo lỗi định dạng
@@ -35,8 +46,14 @@ export default function ReviewTable({
 
   // nếu số trường đổi (user thêm/bớt trong Cài đặt) thì chọn lại chế độ hợp lý
   useEffect(() => {
-    setMode(fields.length > CARD_THRESHOLD ? 'cards' : 'table');
-  }, [fields.length]);
+    setMode(
+      hasMultiVisit
+        ? 'grouped'
+        : fields.length > CARD_THRESHOLD
+        ? 'cards'
+        : 'table'
+    );
+  }, [fields.length, hasMultiVisit]);
 
   function setValue(rowIdx: number, key: string, value: string) {
     const next = records.map((r, i) => {
@@ -64,6 +81,15 @@ export default function ReviewTable({
         <span style={{ fontSize: 12, color: '#6c757d', marginRight: 'auto' }}>
           {records.length} hồ sơ · {fields.length} trường
         </span>
+        {hasId && (
+          <button
+            className={mode === 'grouped' ? '' : 'ghost'}
+            style={{ padding: '4px 12px' }}
+            onClick={() => setMode('grouped')}
+          >
+            Theo bệnh nhân
+          </button>
+        )}
         <button
           className={mode === 'table' ? '' : 'ghost'}
           style={{ padding: '4px 12px' }}
@@ -80,7 +106,15 @@ export default function ReviewTable({
         </button>
       </div>
 
-      {mode === 'table' ? (
+      {mode === 'grouped' ? (
+        <GroupedReview
+          fields={fields}
+          records={records}
+          issues={issues}
+          onChange={onChange}
+          onOpenPdf={onOpenPdf}
+        />
+      ) : mode === 'table' ? (
         <TableView
           fields={fields}
           records={records}

@@ -1,6 +1,12 @@
 import { useEffect, useState } from 'react';
-import type { FieldDef, SheetTab } from '../electron/types';
+import type { FieldDef, FieldRole, SheetTab } from '../electron/types';
 import type { TabSyncPlan } from '../electron/google';
+
+const ROLE_LABEL: Record<FieldRole, string> = {
+  id: 'Định danh (mã BN)',
+  fixed: 'Cố định',
+  varying: 'Biến thiên',
+};
 
 interface Props {
   // bộ trường chung (khi chưa chọn tab)
@@ -123,7 +129,20 @@ export default function FieldsEditor({
     setRows((rs) => rs.map((r, i) => (i === idx ? { ...r, ...patch } : r)));
   }
   function addRow() {
-    setRows((rs) => [...rs, { key: '', label: '', description: '', example: '' }]);
+    setRows((rs) => [
+      ...rs,
+      { key: '', label: '', description: '', example: '', role: 'varying' },
+    ]);
+  }
+  function setRole(idx: number, role: FieldRole) {
+    setRows((rs) =>
+      rs.map((r, i) => {
+        if (i === idx) return { ...r, role };
+        // chỉ 1 trường được là 'id' -> hạ các trường id khác xuống 'fixed'
+        if (role === 'id' && r.role === 'id') return { ...r, role: 'fixed' };
+        return r;
+      })
+    );
   }
   function removeRow(idx: number) {
     setRows((rs) => rs.filter((_, i) => i !== idx));
@@ -146,6 +165,7 @@ export default function FieldsEditor({
         label: r.label.trim(),
         description: r.description.trim(),
         example: (r.example ?? '').trim() || undefined,
+        role: r.role ?? 'varying',
       }));
   }
 
@@ -343,6 +363,18 @@ export default function FieldsEditor({
         ngày.
       </p>
 
+      <p style={{ fontSize: 12, color: '#6c757d' }}>
+        <strong>Vai trò</strong> giúp app gộp nhiều đợt khám của cùng bệnh nhân:
+        <br />
+        • <strong>Định danh</strong>: mã bệnh nhân (chỉ 1 trường). Các hồ sơ trùng
+        mã này = cùng 1 người.
+        <br />
+        • <strong>Cố định</strong>: không đổi giữa các đợt (họ tên, ngày sinh) —
+        app cảnh báo nếu AI đọc lệch giữa các file.
+        <br />• <strong>Biến thiên</strong>: thay đổi theo từng lần khám (men gan,
+        ngày khám, chẩn đoán) — app xếp cạnh nhau theo đợt để so sánh.
+      </p>
+
       {loading ? (
         <p style={{ color: '#6c757d' }}>Đang tải bộ trường…</p>
       ) : (
@@ -350,10 +382,11 @@ export default function FieldsEditor({
           <table>
             <thead>
               <tr>
-                <th style={{ width: 160 }}>Tên hiển thị (cột Sheet)</th>
+                <th style={{ width: 150 }}>Tên hiển thị (cột Sheet)</th>
                 <th>Mô tả cho AI</th>
-                <th style={{ width: 150 }}>Ví dụ (tuỳ chọn)</th>
-                <th style={{ width: 120 }}></th>
+                <th style={{ width: 130 }}>Ví dụ (tuỳ chọn)</th>
+                <th style={{ width: 130 }}>Vai trò</th>
+                <th style={{ width: 110 }}></th>
               </tr>
             </thead>
             <tbody>
@@ -362,23 +395,35 @@ export default function FieldsEditor({
                   <td>
                     <input
                       value={f.label}
-                      placeholder="VD: Số điện thoại"
+                      placeholder="VD: Men gan (AST)"
                       onChange={(e) => update(i, { label: e.target.value })}
                     />
                   </td>
                   <td>
                     <input
                       value={f.description}
-                      placeholder="VD: Số điện thoại liên hệ của bệnh nhân"
+                      placeholder="VD: Chỉ số men gan AST của đợt khám này"
                       onChange={(e) => update(i, { description: e.target.value })}
                     />
                   </td>
                   <td>
                     <input
                       value={f.example ?? ''}
-                      placeholder="VD: 0912345678"
+                      placeholder="VD: 45"
                       onChange={(e) => update(i, { example: e.target.value })}
                     />
+                  </td>
+                  <td>
+                    <select
+                      value={f.role ?? 'varying'}
+                      onChange={(e) => setRole(i, e.target.value as FieldRole)}
+                    >
+                      {(['id', 'fixed', 'varying'] as FieldRole[]).map((r) => (
+                        <option key={r} value={r}>
+                          {ROLE_LABEL[r]}
+                        </option>
+                      ))}
+                    </select>
                   </td>
                   <td>
                     <div className="row" style={{ gap: 4, flexWrap: 'nowrap' }}>

@@ -1,8 +1,36 @@
+# Dependencies
 node_modules/
+
+# Build output
 dist/
 dist-electron/
 release/
+*.tsbuildinfo
+
+# Logs
 *.log
-.DS_Store
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# --- Dữ liệu / bí mật của người dùng (KHÔNG commit) ---
+# OpenAI API key + Google OAuth client secret
 config.json
+# Phiên đăng nhập Google
 google-token.json
+# Cấu hình trường do người dùng chỉnh qua UI (mỗi máy mỗi khác)
+# fields.config.json bản mặc định VẪN commit; bản userData nằm ngoài repo
+import-history.json
+
+# Editor / OS
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
+*.swp
+
+# Env
+.env
+.env.local
+.env.*.local
