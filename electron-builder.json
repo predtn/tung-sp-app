@@ -1,0 +1,18 @@
+{
+  "appId": "com.tung.nhaplieukhongkho",
+  "productName": "Nhập liệu không khó",
+  "directories": { "output": "release" },
+  "files": ["dist/**/*", "dist-electron/**/*"],
+  "extraResources": ["fields.config.json", "assets/**/*"],
+  "npmRebuild": false,
+  "win": {
+    "target": ["nsis"],
+    "icon": "assets/icon.ico",
+    "signAndEditExecutable": false
+  },
+  "nsis": {
+    "oneClick": false,
+    "allowToChangeInstallationDirectory": true,
+    "shortcutName": "Nhập liệu không khó"
+  }
+}

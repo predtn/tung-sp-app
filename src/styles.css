@@ -1,0 +1,282 @@
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+  background: #f4f6f8;
+  color: #1a1a1a;
+  font-size: 14px;
+}
+.app { display: flex; flex-direction: column; height: 100vh; }
+.topbar {
+  display: flex; align-items: center; gap: 12px;
+  padding: 10px 16px; background: #0d6efd; color: #fff;
+}
+.topbar h1 { font-size: 16px; margin: 0; flex: 1; }
+.topbar button { background: rgba(255,255,255,.18); }
+.topbar button:hover {
+  background: rgba(255,255,255,.32);
+  box-shadow: none;
+}
+.body { flex: 1; overflow: auto; padding: 16px; }
+
+button {
+  border: none; border-radius: 6px; padding: 8px 14px;
+  background: #0d6efd; color: #fff; cursor: pointer; font-size: 14px;
+  transition: background-color .12s ease, box-shadow .12s ease,
+    transform .06s ease, opacity .12s ease, border-color .12s ease, color .12s ease;
+}
+button:hover { background: #0b5ed7; box-shadow: 0 2px 6px rgba(13, 110, 253, .3); }
+button:active { transform: translateY(1px); box-shadow: none; }
+
+button.secondary { background: #6c757d; }
+button.secondary:hover { background: #5c636a; box-shadow: 0 2px 6px rgba(108, 117, 125, .3); }
+
+button.ghost { background: transparent; color: #0d6efd; border: 1px solid #0d6efd; }
+button.ghost:hover { background: #e7f1ff; box-shadow: none; }
+
+button:disabled { opacity: .5; cursor: not-allowed; }
+/* nút bị vô hiệu hoá không phản ứng hover */
+button:disabled:hover {
+  background: #0d6efd; box-shadow: none; transform: none;
+}
+button.secondary:disabled:hover { background: #6c757d; }
+button.ghost:disabled:hover { background: transparent; }
+
+/* nút trông như link, dùng cho tên file nguồn */
+button.link-btn {
+  background: none;
+  border: none;
+  padding: 0;
+  color: #0d6efd;
+  font-size: inherit;
+  text-align: left;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+button.link-btn:hover {
+  color: #0a58ca;
+  background: none;
+  box-shadow: none;
+  text-decoration-thickness: 2px;
+}
+button.link-btn:active { transform: none; }
+
+.card {
+  background: #fff; border-radius: 8px; padding: 16px;
+  box-shadow: 0 1px 3px rgba(0,0,0,.08); margin-bottom: 16px;
+}
+.card h2 { margin: 0 0 12px; font-size: 15px; }
+
+.row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.field { display: flex; flex-direction: column; gap: 4px; margin-bottom: 10px; }
+.field label { font-weight: 600; font-size: 13px; }
+.field input, .field select {
+  padding: 7px 9px; border: 1px solid #ced4da; border-radius: 6px; font-size: 14px;
+  transition: border-color .12s ease, box-shadow .12s ease;
+}
+.field input:hover, .field select:hover { border-color: #86b7fe; }
+.field input:focus, .field select:focus {
+  border-color: #0d6efd; outline: none;
+  box-shadow: 0 0 0 3px rgba(13, 110, 253, .15);
+}
+select {
+  transition: border-color .12s ease, box-shadow .12s ease;
+  cursor: pointer;
+}
+select:hover { border-color: #86b7fe; }
+
+table { width: 100%; border-collapse: collapse; }
+th, td {
+  border: 1px solid #e0e0e0; padding: 6px 8px; text-align: left; font-size: 13px;
+  vertical-align: top;
+}
+th { background: #f0f2f5; position: sticky; top: 0; }
+td input {
+  width: 100%; border: 1px solid transparent; background: transparent;
+  padding: 4px; font-size: 13px; border-radius: 4px;
+  transition: background-color .12s ease, border-color .12s ease;
+}
+td input:hover { background: #f0f4f8; border-color: #ced4da; }
+td input:focus { border-color: #0d6efd; background: #fff; outline: none; }
+td.uncertain input:hover { background: #fff3cd; }
+td.uncertain input { background: #fff8e1; border-color: #ffca28; }
+td.invalid input { background: #fdecea; border-color: #e57373; }
+td.invalid input:hover { background: #fbd7d4; }
+td.error { background: #fdecea; color: #b71c1c; }
+
+.badge {
+  display: inline-block; padding: 2px 8px; border-radius: 10px;
+  font-size: 12px; background: #e0e0e0;
+}
+.badge.ok { background: #d4edda; color: #155724; }
+.badge.warn { background: #fff3cd; color: #856404; }
+
+.dropzone {
+  border: 2px dashed #adb5bd; border-radius: 10px; padding: 40px;
+  text-align: center; color: #6c757d; background: #fff;
+  transition: border-color .12s ease, background-color .12s ease;
+}
+.dropzone:hover { border-color: #0d6efd; background: #f5f9ff; }
+.dropzone.drag { border-color: #0d6efd; background: #e7f1ff; color: #0d6efd; }
+
+.toast {
+  position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
+  background: #333; color: #fff; padding: 10px 18px; border-radius: 6px;
+  box-shadow: 0 2px 10px rgba(0,0,0,.3); z-index: 100;
+}
+.spin { animation: spin 1s linear infinite; display: inline-block; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ---- Layout panel xem PDF cạnh bảng review ---- */
+.review-wrap.with-pdf {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+}
+.review-wrap.with-pdf .review-main {
+  flex: 1;
+  min-width: 0;
+}
+.pdf-panel {
+  flex: 0 0 46%;
+  max-width: 46%;
+  position: sticky;
+  top: 0;
+  align-self: stretch;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid #d0d7de;
+  border-radius: 8px;
+  background: #f6f8fa;
+  max-height: calc(100vh - 130px);
+  overflow: hidden;
+}
+.pdf-panel-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  background: #eaeef2;
+  border-bottom: 1px solid #d0d7de;
+}
+.pdf-panel-title {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.pdf-panel-body {
+  flex: 1;
+  overflow: auto;
+  padding: 10px;
+  text-align: center;
+}
+.pdf-panel-body .pdf-page {
+  display: block;
+  margin: 0 auto 10px;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, .2);
+  max-width: 100%;
+  height: auto;
+}
+.pdf-panel-msg {
+  padding: 24px;
+  text-align: center;
+  color: #6c757d;
+  font-size: 13px;
+}
+.pdf-panel-foot {
+  padding: 5px 10px;
+  border-top: 1px solid #d0d7de;
+  font-size: 11px;
+  color: #6c757d;
+  text-align: center;
+}
+
+/* ---- Chế độ xem Thẻ (khi có nhiều trường) ---- */
+.cards-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+  gap: 14px;
+}
+.record-card {
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  background: #fff;
+  overflow: hidden;
+}
+.record-card.has-error { border-color: #f5c6cb; }
+.record-card-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: #f0f2f5;
+  border-bottom: 1px solid #e0e0e0;
+  font-size: 13px;
+}
+.record-card-file {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.record-card-file .link-btn {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.record-card-error {
+  padding: 12px;
+  color: #b71c1c;
+  background: #fdecea;
+  font-size: 13px;
+}
+.record-card-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 8px 12px;
+  padding: 12px;
+}
+.card-field {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.card-field-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: #6c757d;
+  text-transform: uppercase;
+  letter-spacing: .02em;
+}
+.card-field input {
+  padding: 6px 8px;
+  border: 1px solid #ced4da;
+  border-radius: 5px;
+  font-size: 13px;
+  width: 100%;
+}
+.card-field input:focus { border-color: #0d6efd; outline: none; }
+.card-field.uncertain input {
+  background: #fff8e1;
+  border-color: #ffca28;
+}
+.card-field.invalid input {
+  background: #fdecea;
+  border-color: #e57373;
+}
+.card-field-issue {
+  font-size: 11px;
+  color: #b71c1c;
+}
+.record-card-usage {
+  padding: 6px 12px;
+  border-top: 1px solid #eee;
+  font-size: 11px;
+  color: #adb5bd;
+}

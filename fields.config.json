@@ -1,0 +1,25 @@
+{
+  "note": "Danh sách các trường cần trích xuất từ PDF bệnh nhân. Thêm/sửa trường ở đây rồi khởi động lại app. 'key' là tên dùng nội bộ, 'label' là tên cột trong Google Sheet, 'description' giúp AI hiểu cần lấy gì.",
+  "fields": [
+    {
+      "key": "ho_ten",
+      "label": "Họ và tên",
+      "description": "Họ và tên đầy đủ của bệnh nhân"
+    },
+    {
+      "key": "dia_chi",
+      "label": "Địa chỉ",
+      "description": "Địa chỉ thường trú hoặc nơi ở hiện tại của bệnh nhân"
+    },
+    {
+      "key": "ngay_kham",
+      "label": "Ngày khám",
+      "description": "Ngày bệnh nhân đến khám, định dạng dd/mm/yyyy"
+    },
+    {
+      "key": "chan_doan",
+      "label": "Chẩn đoán bệnh",
+      "description": "Chẩn đoán của bác sĩ, bao gồm cả mã ICD nếu có"
+    }
+  ]
+}
