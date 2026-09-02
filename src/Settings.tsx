@@ -52,11 +52,28 @@ export default function Settings({
         </div>
         <div className="field">
           <label>Model</label>
-          <input
-            value={c.openaiModel}
-            placeholder="gpt-4o"
+          <select
+            value={
+              ['gpt-4.1-mini', 'gpt-5-mini', 'gpt-4.1'].includes(c.openaiModel)
+                ? c.openaiModel
+                : 'gpt-4.1-mini'
+            }
             onChange={(e) => set('openaiModel', e.target.value)}
-          />
+          >
+            <option value="gpt-4.1-mini">
+              gpt-4.1-mini — nhanh, rẻ, đủ tốt cho hồ sơ rõ ràng (khuyên dùng)
+            </option>
+            <option value="gpt-5-mini">
+              gpt-5-mini — chính xác hơn, chậm hơn (reasoning)
+            </option>
+            <option value="gpt-4.1">
+              gpt-4.1 — chính xác cao nhất, đắt hơn nhiều
+            </option>
+          </select>
+          <span style={{ fontSize: 12, color: '#6c757d' }}>
+            Bác sĩ đã soát từng ô ở bước 2 nên sai nhỏ của model rẻ không nghiêm
+            trọng. Đổi lên gpt-5-mini / gpt-4.1 nếu hồ sơ khó / scan mờ hay bị sai.
+          </span>
         </div>
       </div>
 

@@ -227,7 +227,9 @@ function TableView({
                 )}
               </td>
               <td style={{ fontSize: 12, color: '#6c757d' }}>
-                {r.usage ? (
+                {r.fromCache ? (
+                  <span style={{ color: '#1e8449' }}>đã quét trước · miễn phí</span>
+                ) : r.usage ? (
                   <>
                     ${r.usage.estimatedUsd.toFixed(4)}
                     <div>{r.usage.totalTokens.toLocaleString('vi-VN')} token</div>
@@ -306,12 +308,16 @@ function CardsView({
             </div>
           )}
 
-          {r.usage && (
+          {r.fromCache ? (
+            <div className="record-card-usage" style={{ color: '#1e8449' }}>
+              đã quét trước đó · không tính phí
+            </div>
+          ) : r.usage ? (
             <div className="record-card-usage">
               ${r.usage.estimatedUsd.toFixed(4)} ·{' '}
               {r.usage.totalTokens.toLocaleString('vi-VN')} token
             </div>
-          )}
+          ) : null}
         </div>
       ))}
     </div>

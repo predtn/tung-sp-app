@@ -1,8 +1,8 @@
 {
   "name": "tung-sp-app",
-  "productName": "Nhập liệu không khó",
+  "productName": "RxScan",
   "version": "0.1.0",
-  "description": "Quét thông tin bệnh nhân từ PDF và import vào Google Sheets",
+  "description": "RxScan — quét hồ sơ bệnh nhân từ PDF và import vào Google Sheets",
   "main": "dist-electron/main.js",
   "author": "predzxcvn@gmail.com",
   "license": "MIT",
@@ -30,7 +30,7 @@
     "@napi-rs/canvas": "^0.1.56",
     "google-auth-library": "^9.14.1",
     "googleapis": "^144.0.0",
-    "openai": "^4.67.1",
+    "openai": "^7.9.0",
     "pdfjs-dist": "^4.7.76",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"

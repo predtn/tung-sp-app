@@ -110,6 +110,26 @@ function getClient(clientId: string, clientSecret: string): OAuth2Client {
   return oauthClient;
 }
 
+/** Bọc mọi gọi Sheets: nếu token hỏng -> xoá token + báo lỗi dễ hiểu để user đăng nhập lại. */
+export async function withAuth<T>(fn: () => Promise<T>): Promise<T> {
+  try {
+    return await fn();
+  } catch (err: any) {
+    const status = err?.response?.status ?? err?.code;
+    const msg = String(err?.message ?? '');
+    if (
+      status === 401 ||
+      /invalid credentials|invalid_grant|invalid_token|unauthorized/i.test(msg)
+    ) {
+      signOut(); // xoá token hỏng
+      throw new Error(
+        'Phiên đăng nhập Google đã hết hạn. Vào Cài đặt → Đăng nhập Google lại.'
+      );
+    }
+    throw err;
+  }
+}
+
 export async function listTabs(
   clientId: string,
   clientSecret: string,
@@ -121,6 +141,11 @@ export async function listTabs(
     sheetId: s.properties?.sheetId ?? 0,
     title: s.properties?.title ?? '',
   }));
+}
+
+/** Bọc tên tab thành A1 range an toàn (tên có dấu cách / số / nháy đơn). */
+function q(tabTitle: string): string {
+  return `'${tabTitle.replace(/'/g, "''")}'`;
 }
 
 /** Ký tự ngăn cách khi ghép khoá kép — dùng chung ở main lẫn renderer. */
@@ -146,7 +171,7 @@ export async function existingKeyPairs(
   const sheets = google.sheets({ version: 'v4', auth: getClient(clientId, clientSecret) });
   const resp = await sheets.spreadsheets.values.get({
     spreadsheetId,
-    range: `'${tabTitle.replace(/'/g, "''")}'`,
+    range: q(tabTitle),
     majorDimension: 'ROWS',
   });
   const rows: string[][] = (resp.data.values as string[][]) ?? [];
@@ -188,7 +213,7 @@ export async function createTab(
   // ghi hàng tiêu đề + in đậm
   await sheets.spreadsheets.values.update({
     spreadsheetId,
-    range: `${tab.title}!A1`,
+    range: `${q(tab.title)}!A1`,
     valueInputOption: 'RAW',
     requestBody: { values: [headers] },
   });
@@ -210,7 +235,7 @@ export async function appendRows(
   // chuyển các giá trị giống ngày tháng (vd "15/03/1992") thành số serial ngày.
   const resp = await sheets.spreadsheets.values.append({
     spreadsheetId,
-    range: `${tabTitle}!A1`,
+    range: `${q(tabTitle)}!A1`,
     valueInputOption: 'RAW',
     insertDataOption: 'INSERT_ROWS',
     requestBody: { values: rows },
@@ -258,13 +283,13 @@ export async function ensureHeaders(
   const sheets = google.sheets({ version: 'v4', auth: getClient(clientId, clientSecret) });
   const cur = await sheets.spreadsheets.values.get({
     spreadsheetId,
-    range: `${tabTitle}!1:1`,
+    range: `${q(tabTitle)}!1:1`,
   });
   const existing = cur.data.values?.[0] ?? [];
   if (existing.length === 0) {
     await sheets.spreadsheets.values.update({
       spreadsheetId,
-      range: `${tabTitle}!A1`,
+      range: `${q(tabTitle)}!A1`,
       valueInputOption: 'RAW',
       requestBody: { values: [headers] },
     });
@@ -308,7 +333,7 @@ export async function planTabSync(
   const sheets = google.sheets({ version: 'v4', auth: getClient(clientId, clientSecret) });
   const resp = await sheets.spreadsheets.values.get({
     spreadsheetId,
-    range: `${tabTitle}`,
+    range: q(tabTitle),
     majorDimension: 'ROWS',
   });
   const rows: string[][] = (resp.data.values as string[][]) ?? [];
@@ -357,7 +382,7 @@ export async function applyTabSync(
 
   const resp = await sheets.spreadsheets.values.get({
     spreadsheetId,
-    range: `${tabTitle}`,
+    range: q(tabTitle),
     majorDimension: 'ROWS',
   });
   const rows: string[][] = (resp.data.values as string[][]) ?? [];
@@ -383,13 +408,13 @@ export async function applyTabSync(
   // xoá sạch vùng cũ rồi ghi lại (đơn giản, tránh lệch cột)
   await sheets.spreadsheets.values.clear({
     spreadsheetId,
-    range: `${tabTitle}`,
+    range: q(tabTitle),
   });
 
   const values = [newHeaders, ...rebuilt];
   await sheets.spreadsheets.values.update({
     spreadsheetId,
-    range: `${tabTitle}!A1`,
+    range: `${q(tabTitle)}!A1`,
     valueInputOption: 'RAW',
     requestBody: { values },
   });

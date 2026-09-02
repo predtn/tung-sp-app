@@ -71,9 +71,14 @@ export async function extractRecord(
   }
 
   try {
+    // Model reasoning đời 5: chỉ nhận temperature mặc định (1), và mặc định "suy nghĩ"
+    // nhiều -> chậm + tốn token. Task trích xuất đơn giản nên đặt reasoning_effort tối thiểu.
+    const isReasoning = /^gpt-5/.test(model) || /^o[0-9]/.test(model);
     const resp = await client.chat.completions.create({
       model,
-      temperature: 0,
+      ...(isReasoning
+        ? { reasoning_effort: 'minimal' as const }
+        : { temperature: 0 }),
       messages: [
         { role: 'system', content: SYSTEM_PROMPT },
         { role: 'user', content: userContent },

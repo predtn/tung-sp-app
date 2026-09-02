@@ -3,7 +3,7 @@ import type { ExtractedRecord, FieldDef } from '../electron/types';
 export interface PatientGroup {
   /** giá trị mã BN (khoá gộp); '' nếu không có trường id hoặc AI không đọc được */
   idValue: string;
-  /** các bản ghi (mỗi bản ghi = 1 đợt khám), giữ nguyên thứ tự quét */
+  /** các bản ghi (mỗi bản ghi = 1 đợt khám), đã sắp theo Khoá đợt khám */
   records: ExtractedRecord[];
   /** chỉ số toàn cục của record trong mảng gốc, để onChange map ngược */
   indices: number[];
@@ -60,7 +60,46 @@ export function groupByPatient(
     }
   });
 
+  // Sắp các đợt trong mỗi nhóm theo giá trị "Khoá đợt khám" (mã đợt / ngày khám).
+  const vkf = visitKeyField(fields);
+  if (vkf) {
+    for (const g of groups.values()) {
+      const order = g.records
+        .map((r, pos) => ({ pos, key: (r.values[vkf.key] ?? '').trim() }))
+        .sort((a, b) => compareVisitKey(a.key, b.key))
+        .map((x) => x.pos);
+      g.records = order.map((p) => g.records[p]);
+      g.indices = order.map((p) => g.indices[p]);
+    }
+  }
+
   return [...groups.values(), ...singles];
+}
+
+/**
+ * So sánh 2 khoá đợt khám: ưu tiên số nếu cả hai chứa số (DK-1, DK-2, DK-10 đúng thứ tự),
+ * dạng ngày dd/mm/yyyy so theo mốc thời gian, còn lại so chuỗi.
+ */
+function compareVisitKey(a: string, b: string): number {
+  const da = parseDate(a);
+  const db = parseDate(b);
+  if (da !== null && db !== null) return da - db;
+
+  const na = firstNumber(a);
+  const nb = firstNumber(b);
+  if (na !== null && nb !== null && na !== nb) return na - nb;
+
+  return a.localeCompare(b, 'vi', { numeric: true });
+}
+
+function parseDate(s: string): number | null {
+  const m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (!m) return null;
+  return new Date(+m[3], +m[2] - 1, +m[1]).getTime();
+}
+function firstNumber(s: string): number | null {
+  const m = s.match(/\d+/);
+  return m ? Number(m[0]) : null;
 }
 
 /** Trong 1 nhóm, các trường 'fixed' có giá trị khác nhau giữa các đợt -> mâu thuẫn. */

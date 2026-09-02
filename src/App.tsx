@@ -5,6 +5,7 @@ import ReviewTable from './ReviewTable';
 import History from './History';
 import PdfPanel from './PdfPanel';
 import { validateRecords, countUncertain } from './validation';
+import { groupByPatient } from './grouping';
 
 type View = 'main' | 'settings' | 'history';
 
@@ -37,6 +38,16 @@ export default function App() {
     setTimeout(() => setToast(''), 4000);
   }
 
+  // Lỗi từ Google có chữ "hết hạn" -> token đã bị xoá ở main, cập nhật lại trạng thái.
+  function handleGoogleError(e: any): string {
+    const msg = e?.message ?? String(e);
+    if (/hết hạn|đăng nhập Google lại/i.test(msg)) {
+      setSignedIn(false);
+      setTabs([]);
+    }
+    return msg;
+  }
+
   // Trả về danh sách tab mới nhất. quiet=true: không hiện toast lỗi (dùng khi refresh ngầm).
   async function refreshTabs(quiet = false): Promise<SheetTab[]> {
     try {
@@ -51,7 +62,8 @@ export default function App() {
       }
       return t;
     } catch (e: any) {
-      if (!quiet) showToast('Không lấy được danh sách tab: ' + (e?.message ?? e));
+      const msg = handleGoogleError(e);
+      if (!quiet) showToast('Không lấy được danh sách tab: ' + msg);
       return tabs;
     }
   }
@@ -99,7 +111,29 @@ export default function App() {
   // dồn dập gây rate-limit của OpenAI. Kết quả giữ đúng thứ tự file đầu vào.
   const CONCURRENCY = 3;
 
-  async function processFiles(paths: string[]) {
+  // hộp thoại hỏi khi có file đã quét trước đó (null = ẩn)
+  const [cacheChoice, setCacheChoice] = useState<{
+    paths: string[];
+    cachedNames: string[];
+  } | null>(null);
+
+  // Bước đầu: kiểm tra file nào đã có cache. Có -> hỏi bác sĩ. Không -> quét luôn.
+  async function startFiles(paths: string[]) {
+    if (!paths.length) return;
+    try {
+      const peek = await window.api.peekCache(paths, selectedTab || undefined);
+      const cachedNames = peek.filter((p) => p.cached).map((p) => p.name);
+      if (cachedNames.length > 0) {
+        setCacheChoice({ paths, cachedNames });
+        return;
+      }
+    } catch {
+      // lỗi peek -> cứ quét bình thường
+    }
+    processFiles(paths, false);
+  }
+
+  async function processFiles(paths: string[], forceRescan: boolean) {
     if (!paths.length) return;
     setProcessing(true);
     setProgress({ done: 0, total: paths.length });
@@ -113,7 +147,8 @@ export default function App() {
         const idx = next++;
         out[idx] = await window.api.processFile(
           paths[idx],
-          selectedTab || undefined
+          selectedTab || undefined,
+          forceRescan
         );
         done += 1;
         setProgress({ done, total: paths.length });
@@ -128,17 +163,18 @@ export default function App() {
 
     setRecords(out);
     setProcessing(false);
+
     const errs = out.filter((r) => r.error).length;
-    showToast(
-      errs
-        ? `Xong ${out.length} file, ${errs} file có lỗi (xem ô đỏ).`
-        : `Đã quét xong ${out.length} file.`
-    );
+    const cached = out.filter((r) => r.fromCache).length;
+    const parts = [`Xong ${out.length} file`];
+    if (cached > 0) parts.push(`${cached} file lấy từ bản đã quét (không tính phí)`);
+    if (errs > 0) parts.push(`${errs} file có lỗi (xem ô đỏ)`);
+    showToast(parts.join(' · '));
   }
 
   async function onPick() {
     const paths = await window.api.pickPdfs();
-    processFiles(paths);
+    startFiles(paths);
   }
 
   function onDrop(e: React.DragEvent) {
@@ -147,7 +183,7 @@ export default function App() {
     const paths = Array.from(e.dataTransfer.files)
       .filter((f) => f.name.toLowerCase().endsWith('.pdf'))
       .map((f) => (f as File & { path: string }).path);
-    processFiles(paths);
+    startFiles(paths);
   }
 
   async function onSignIn() {
@@ -168,7 +204,7 @@ export default function App() {
       setRecords([]);
       setPdfView(null);
     } catch (e: any) {
-      showToast('Import thất bại: ' + (e?.message ?? e));
+      showToast('Import thất bại: ' + handleGoogleError(e));
     } finally {
       setImporting(false);
     }
@@ -288,7 +324,11 @@ export default function App() {
       if (!ok) return;
     }
 
-    await doImport(toImport);
+    // Sắp thứ tự ghi: theo Mã BN, rồi theo Khoá đợt khám tăng dần
+    const ordered = groupByPatient(toImport, activeFields).flatMap(
+      (g) => g.records
+    );
+    await doImport(ordered);
   }
 
   if (!config) return <div style={{ padding: 20 }}>Đang tải…</div>;
@@ -303,7 +343,7 @@ export default function App() {
           height={24}
           style={{ borderRadius: 4 }}
         />
-        <h1>Nhập liệu không khó</h1>
+        <h1>RxScan</h1>
         <span className={'badge ' + (signedIn ? 'ok' : 'warn')}>
           {signedIn ? 'Google: đã kết nối' : 'Google: chưa kết nối'}
         </span>
@@ -462,7 +502,15 @@ export default function App() {
                     {records
                       .reduce((sum, r) => sum + (r.usage?.totalTokens ?? 0), 0)
                       .toLocaleString('vi-VN')}{' '}
-                    token) — chỉ là ước tính, xem chính xác tại{' '}
+                    token)
+                    {records.some((r) => r.fromCache) && (
+                      <>
+                        {' '}
+                        · {records.filter((r) => r.fromCache).length} file lấy từ
+                        bản đã quét, không tính phí
+                      </>
+                    )}{' '}
+                    — chỉ là ước tính, xem chính xác tại{' '}
                     <a
                       href="https://platform.openai.com/usage"
                       target="_blank"
@@ -530,6 +578,57 @@ export default function App() {
       </div>
 
       {toast && <div className="toast">{toast}</div>}
+
+      {cacheChoice && (
+        <div className="modal-overlay">
+          <div className="modal">
+            <h3>Một số file đã được quét trước đó</h3>
+            <p style={{ fontSize: 13, color: '#495057' }}>
+              {cacheChoice.cachedNames.length} / {cacheChoice.paths.length} file
+              dưới đây đã có kết quả lưu sẵn (quét trước đó):
+            </p>
+            <ul className="cache-file-list">
+              {cacheChoice.cachedNames.map((n) => (
+                <li key={n}>{n}</li>
+              ))}
+            </ul>
+            <p style={{ fontSize: 13, color: '#495057' }}>
+              Bạn muốn dùng lại kết quả đã lưu (nhanh, không mất phí) hay để AI quét
+              lại từ đầu?
+            </p>
+            <div
+              className="row"
+              style={{ justifyContent: 'flex-end', marginTop: 14 }}
+            >
+              <button
+                className="secondary"
+                onClick={() => setCacheChoice(null)}
+              >
+                Huỷ
+              </button>
+              <button
+                className="ghost"
+                onClick={() => {
+                  const p = cacheChoice.paths;
+                  setCacheChoice(null);
+                  processFiles(p, true);
+                }}
+              >
+                AI quét lại tất cả
+              </button>
+              <button
+                onClick={() => {
+                  const p = cacheChoice.paths;
+                  setCacheChoice(null);
+                  processFiles(p, false);
+                }}
+              >
+                Dùng kết quả đã lưu
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

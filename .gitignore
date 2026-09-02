@@ -21,6 +21,7 @@ google-token.json
 # Cấu hình trường do người dùng chỉnh qua UI (mỗi máy mỗi khác)
 # fields.config.json bản mặc định VẪN commit; bản userData nằm ngoài repo
 import-history.json
+scan-cache.json
 
 # Editor / OS
 .DS_Store

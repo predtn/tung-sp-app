@@ -4,10 +4,16 @@ import type { ImportLogEntry } from '../electron/history';
 export default function History() {
   const [entries, setEntries] = useState<ImportLogEntry[]>([]);
   const [loading, setLoading] = useState(true);
+  const [cacheCount, setCacheCount] = useState(0);
 
   async function load() {
     setLoading(true);
-    setEntries(await window.api.getHistory());
+    const [h, c] = await Promise.all([
+      window.api.getHistory(),
+      window.api.cacheStats(),
+    ]);
+    setEntries(h);
+    setCacheCount(c.count);
     setLoading(false);
   }
 
@@ -19,6 +25,18 @@ export default function History() {
     if (!window.confirm('Xoá toàn bộ nhật ký import? (không ảnh hưởng dữ liệu trên Sheet)'))
       return;
     await window.api.clearHistory();
+    load();
+  }
+
+  async function onClearCache() {
+    if (
+      !window.confirm(
+        `Xoá bộ nhớ đệm ${cacheCount} file đã quét?\n` +
+          'Lần sau gặp lại các file này sẽ phải quét lại (mất phí AI).'
+      )
+    )
+      return;
+    await window.api.clearCache();
     load();
   }
 
@@ -36,6 +54,29 @@ export default function History() {
         </button>
         <button className="secondary" onClick={onClear} disabled={!entries.length}>
           Xoá nhật ký
+        </button>
+      </div>
+
+      <div
+        className="row"
+        style={{
+          marginBottom: 12,
+          padding: '8px 12px',
+          background: '#f0f7f2',
+          borderRadius: 6,
+          fontSize: 13,
+        }}
+      >
+        <span style={{ flex: 1 }}>
+          Bộ nhớ đệm: <strong>{cacheCount}</strong> file đã quét — gặp lại file
+          giống hệt sẽ không quét lại, không mất phí.
+        </span>
+        <button
+          className="secondary"
+          onClick={onClearCache}
+          disabled={!cacheCount}
+        >
+          Xoá bộ nhớ đệm
         </button>
       </div>
 

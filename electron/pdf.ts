@@ -70,14 +70,26 @@ async function renderPagesToPng(doc: any, numPages: number): Promise<string[]> {
     );
   }
 
+  // scale 1.5 (đủ đọc chữ) + JPEG q80 -> nhẹ hơn nhiều so với PNG 2x, tiết kiệm token.
+  // Giới hạn cạnh dài ~1600px: OpenAI vision resize về 768/2048 nên vượt mức này là phí.
+  const SCALE = 1.5;
+  const MAX_EDGE = 1600;
+
   const images: string[] = [];
   for (let i = 1; i <= numPages; i++) {
     const page = await doc.getPage(i);
-    const viewport = page.getViewport({ scale: 2.0 });
+    let viewport = page.getViewport({ scale: SCALE });
+    const longEdge = Math.max(viewport.width, viewport.height);
+    if (longEdge > MAX_EDGE) {
+      viewport = page.getViewport({ scale: (SCALE * MAX_EDGE) / longEdge });
+    }
     const canvas = createCanvas(viewport.width, viewport.height);
     const ctx = canvas.getContext('2d');
+    // nền trắng để JPEG không ra viền đen ở vùng trong suốt
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, viewport.width, viewport.height);
     await page.render({ canvasContext: ctx as any, viewport }).promise;
-    images.push(canvas.toDataURL('image/png'));
+    images.push(canvas.toDataURL('image/jpeg', 0.8));
   }
   return images;
 }

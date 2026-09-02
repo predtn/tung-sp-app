@@ -33,6 +33,8 @@ export interface ExtractedRecord {
   sourceFile: string;
   sourcePath: string;
   error?: string;
+  /** true nếu kết quả lấy từ cache (file đã quét trước đó) -> không tính phí */
+  fromCache?: boolean;
   usage?: {
     promptTokens: number;
     completionTokens: number;

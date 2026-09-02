@@ -29,8 +29,18 @@ const api = {
     ipcRenderer.invoke('sheets:applySync', tab, fields),
 
   pickPdfs: (): Promise<string[]> => ipcRenderer.invoke('pdf:pick'),
-  processFile: (filePath: string, tab?: string): Promise<ExtractedRecord> =>
-    ipcRenderer.invoke('process:file', filePath, tab),
+  peekCache: (
+    filePaths: string[],
+    tab?: string
+  ): Promise<
+    { path: string; name: string; hash: string; cached: boolean; at?: string; model?: string }[]
+  > => ipcRenderer.invoke('pdf:peekCache', filePaths, tab),
+  processFile: (
+    filePath: string,
+    tab?: string,
+    forceRescan?: boolean
+  ): Promise<ExtractedRecord> =>
+    ipcRenderer.invoke('process:file', filePath, tab, forceRescan),
   openPdf: (filePath: string): Promise<boolean> =>
     ipcRenderer.invoke('pdf:open', filePath),
   readPdf: (filePath: string): Promise<Uint8Array> =>
@@ -49,6 +59,9 @@ const api = {
 
   getHistory: (): Promise<ImportLogEntry[]> => ipcRenderer.invoke('history:get'),
   clearHistory: (): Promise<boolean> => ipcRenderer.invoke('history:clear'),
+
+  cacheStats: (): Promise<{ count: number }> => ipcRenderer.invoke('cache:stats'),
+  clearCache: (): Promise<boolean> => ipcRenderer.invoke('cache:clear'),
 };
 
 contextBridge.exposeInMainWorld('api', api);

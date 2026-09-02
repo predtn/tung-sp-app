@@ -15,11 +15,19 @@ import { extractPdf } from './pdf';
 import { extractRecord } from './extract';
 import * as gs from './google';
 import { loadHistory, addHistory, clearHistory } from './history';
+import {
+  hashFile,
+  getCached,
+  putCached,
+  clearCache,
+  cacheStats,
+  peekCache,
+} from './scanCache';
 import type { AppConfig, ExtractedRecord, FieldDef } from './types';
 
 const isDev = !!process.env.VITE_DEV_SERVER_URL;
 
-const APP_NAME = 'Nhập liệu không khó';
+const APP_NAME = 'RxScan';
 // dev: chạy từ dist-electron/, prod: resources được đóng gói kèm (extraResources)
 const ICON_PATH = isDev
   ? path.join(__dirname, '../assets/icon.png')
@@ -70,8 +78,13 @@ function migrateOldUserData() {
   try {
     fs.mkdirSync(FIXED_USER_DATA, { recursive: true });
     const appDataDir = app.getPath('appData');
-    const legacyDirs = ['Nhập liệu không khó', 'nhập liệu không khó'];
-    const files = ['config.json', 'google-token.json', 'fields.config.json'];
+    const legacyDirs = ['Nhập liệu không khó', 'nhập liệu không khó', 'RxScan'];
+    const files = [
+      'config.json',
+      'google-token.json',
+      'fields.config.json',
+      'import-history.json',
+    ];
     for (const dir of legacyDirs) {
       const legacyPath = path.join(appDataDir, dir);
       if (!fs.existsSync(legacyPath)) continue;
@@ -134,12 +147,14 @@ function registerIpc() {
       const cfg = loadConfig();
       const headers = fields.map((f) => f.label);
       headers.push('Thời gian nhập');
-      return gs.planTabSync(
-        cfg.googleClientId,
-        cfg.googleClientSecret,
-        cfg.spreadsheetId,
-        tabTitle,
-        headers
+      return gs.withAuth(() =>
+        gs.planTabSync(
+          cfg.googleClientId,
+          cfg.googleClientSecret,
+          cfg.spreadsheetId,
+          tabTitle,
+          headers
+        )
       );
     }
   );
@@ -149,13 +164,15 @@ function registerIpc() {
     'sheets:existingKeys',
     async (_e, tabTitle: string, headerA: string, headerB: string) => {
       const cfg = loadConfig();
-      return gs.existingKeyPairs(
-        cfg.googleClientId,
-        cfg.googleClientSecret,
-        cfg.spreadsheetId,
-        tabTitle,
-        headerA,
-        headerB
+      return gs.withAuth(() =>
+        gs.existingKeyPairs(
+          cfg.googleClientId,
+          cfg.googleClientSecret,
+          cfg.spreadsheetId,
+          tabTitle,
+          headerA,
+          headerB
+        )
       );
     }
   );
@@ -167,12 +184,14 @@ function registerIpc() {
       const cfg = loadConfig();
       const headers = fields.map((f) => f.label);
       headers.push('Thời gian nhập');
-      await gs.applyTabSync(
-        cfg.googleClientId,
-        cfg.googleClientSecret,
-        cfg.spreadsheetId,
-        tabTitle,
-        headers
+      await gs.withAuth(() =>
+        gs.applyTabSync(
+          cfg.googleClientId,
+          cfg.googleClientSecret,
+          cfg.spreadsheetId,
+          tabTitle,
+          headers
+        )
       );
       return true;
     }
@@ -187,10 +206,29 @@ function registerIpc() {
     return res.canceled ? [] : res.filePaths;
   });
 
+  // Kiểm tra file nào đã có cache (để renderer hỏi bác sĩ trước khi quét).
+  ipcMain.handle(
+    'pdf:peekCache',
+    (_e, filePaths: string[], tab?: string) => {
+      const fields = tab ? loadFieldsForTab(tab) : loadFields();
+      return filePaths.map((p) => ({
+        path: p,
+        name: path.basename(p),
+        ...peekCache(p, fields),
+      }));
+    }
+  );
+
   // Xử lý 1 file: đọc PDF + gọi AI theo bộ trường của tab đích. Trả record.
+  // forceRescan=true -> bỏ qua cache, luôn gọi AI (bác sĩ chọn "quét lại").
   ipcMain.handle(
     'process:file',
-    async (_e, filePath: string, tab?: string): Promise<ExtractedRecord> => {
+    async (
+      _e,
+      filePath: string,
+      tab?: string,
+      forceRescan?: boolean
+    ): Promise<ExtractedRecord> => {
     const cfg = loadConfig();
     const fields = tab ? loadFieldsForTab(tab) : loadFields();
     const blank = (error: string): ExtractedRecord => ({
@@ -200,13 +238,28 @@ function registerIpc() {
       sourcePath: filePath,
       error,
     });
-    if (!cfg.openaiApiKey) {
-      return blank('Chưa cấu hình OpenAI API key trong phần Cài đặt.');
-    }
     try {
+      const hash = hashFile(filePath);
+      if (!forceRescan) {
+        const cached = getCached(hash, fields);
+        if (cached) {
+          return {
+            values: cached.values,
+            uncertain: cached.uncertain,
+            sourceFile: path.basename(filePath),
+            sourcePath: filePath,
+            fromCache: true,
+          };
+        }
+      }
+      if (!cfg.openaiApiKey) {
+        return blank('Chưa cấu hình OpenAI API key trong phần Cài đặt.');
+      }
       const pdf = await extractPdf(filePath);
       const rec = await extractRecord(pdf, fields, cfg.openaiApiKey, cfg.openaiModel);
-      return { ...rec, sourcePath: filePath };
+      const out: ExtractedRecord = { ...rec, sourcePath: filePath };
+      putCached(hash, out, fields, cfg.openaiModel);
+      return out;
     } catch (err: any) {
       return blank(err?.message ?? String(err));
     }
@@ -248,23 +301,29 @@ function registerIpc() {
 
   ipcMain.handle('sheets:tabs', async () => {
     const cfg = loadConfig();
-    return gs.listTabs(cfg.googleClientId, cfg.googleClientSecret, cfg.spreadsheetId);
+    return gs.withAuth(() =>
+      gs.listTabs(cfg.googleClientId, cfg.googleClientSecret, cfg.spreadsheetId)
+    );
   });
 
   ipcMain.handle('sheets:createTab', async (_e, title: string) => {
     const cfg = loadConfig();
     // tab mới lấy bộ trường chung làm khởi tạo, đồng thời lưu thành cấu hình riêng của tab
     const fields = loadFields();
-    saveFieldsForTab(title, fields);
     const headers = fields.map((f) => f.label);
     headers.push('Thời gian nhập');
-    return gs.createTab(
-      cfg.googleClientId,
-      cfg.googleClientSecret,
-      cfg.spreadsheetId,
-      title,
-      headers
+    const tab = await gs.withAuth(() =>
+      gs.createTab(
+        cfg.googleClientId,
+        cfg.googleClientSecret,
+        cfg.spreadsheetId,
+        title,
+        headers
+      )
     );
+    // chỉ lưu cấu hình trường của tab sau khi tạo thành công trên Sheet
+    saveFieldsForTab(title, fields);
+    return tab;
   });
 
   ipcMain.handle(
@@ -275,12 +334,14 @@ function registerIpc() {
       const headers = fields.map((f) => f.label);
       headers.push('Thời gian nhập');
 
-      await gs.ensureHeaders(
-        cfg.googleClientId,
-        cfg.googleClientSecret,
-        cfg.spreadsheetId,
-        tabTitle,
-        headers
+      await gs.withAuth(() =>
+        gs.ensureHeaders(
+          cfg.googleClientId,
+          cfg.googleClientSecret,
+          cfg.spreadsheetId,
+          tabTitle,
+          headers
+        )
       );
 
       const now = new Date().toLocaleString('vi-VN');
@@ -290,12 +351,14 @@ function registerIpc() {
         return row;
       });
 
-      const n = await gs.appendRows(
-        cfg.googleClientId,
-        cfg.googleClientSecret,
-        cfg.spreadsheetId,
-        tabTitle,
-        rows
+      const n = await gs.withAuth(() =>
+        gs.appendRows(
+          cfg.googleClientId,
+          cfg.googleClientSecret,
+          cfg.spreadsheetId,
+          tabTitle,
+          rows
+        )
       );
 
       addHistory({
@@ -317,6 +380,12 @@ function registerIpc() {
   ipcMain.handle('history:get', () => loadHistory());
   ipcMain.handle('history:clear', () => {
     clearHistory();
+    return true;
+  });
+
+  ipcMain.handle('cache:stats', () => cacheStats());
+  ipcMain.handle('cache:clear', () => {
+    clearCache();
     return true;
   });
 }

@@ -5,7 +5,7 @@ import type { AppConfig, FieldDef } from './types';
 
 const DEFAULT_CONFIG: AppConfig = {
   openaiApiKey: '',
-  openaiModel: 'gpt-4o',
+  openaiModel: 'gpt-4.1-mini',
   googleClientId: '',
   googleClientSecret: '',
   spreadsheetId: '',

@@ -1,4 +1,4 @@
-# Nhập liệu không khó
+# RxScan
 
 Ứng dụng desktop (Electron + React). Nạp nhiều file PDF hồ sơ bệnh nhân, AI (OpenAI)
 trích xuất các trường cần thiết, bạn kiểm tra/sửa, rồi import vào một tab trong Google Sheet.
@@ -34,7 +34,15 @@ File cài đặt nằm trong `release/`.
 ## Chuẩn bị khoá / cấu hình (làm 1 lần)
 
 ### 1. OpenAI API key
-Bạn đã có. Dán vào **Cài đặt → OpenAI → API Key**. Model mặc định `gpt-4o` (có vision, đọc được PDF scan).
+Bạn đã có. Dán vào **Cài đặt → OpenAI → API Key**.
+
+**Model** (chọn trong Cài đặt): mặc định `gpt-4.1-mini` — nhanh, rẻ, đủ tốt cho hồ sơ rõ
+ràng khi mỗi trường có mô tả + ví dụ; bác sĩ soát lại ở bước 2. Lựa chọn khác: `gpt-5-mini`
+(chính xác hơn nhưng chậm hơn vì là reasoning model), `gpt-4.1` (chính xác cao nhất, đắt
+hơn nhiều — chỉ khi hồ sơ khó / scan mờ).
+
+PDF scan được render ở scale 1.5x + JPEG q80 (cạnh dài tối đa 1600px) để giảm token mà vẫn
+đọc được chữ.
 
 ### 2. Google OAuth (để ghi Google Sheet bằng tài khoản của bạn)
 
@@ -99,8 +107,14 @@ Khi có trường **Định danh** và quét nhiều hồ sơ trùng mã BN, b�
 - Khi Import: mỗi đợt vẫn ghi thành 1 dòng riêng trên Sheet (long format), phần cố định
   điền đủ cho cả các dòng.
 
-**Chống trùng**: trước khi import, app đối chiếu Mã BN + Ngày khám với dữ liệu đã có trong
-tab. Đợt khám nào đã tồn tại → hỏi và bỏ qua, chỉ import đợt mới.
+**Chống trùng**: trước khi import, app đối chiếu Mã BN + Khoá đợt khám với dữ liệu đã có
+trong tab. Đợt khám nào đã tồn tại → hỏi và bỏ qua, chỉ import đợt mới.
+
+**Bộ nhớ đệm (tránh mất phí quét lại)**: mỗi file PDF được hash theo nội dung. Khi nạp file
+đã quét trước đó (dù đổi tên / copy chỗ khác), app **hỏi**: dùng lại kết quả đã lưu (nhanh,
+không mất phí) hay để AI quét lại từ đầu. Ô chi phí hiện "đã quét trước · miễn phí" khi dùng
+cache. Xoá bộ nhớ đệm trong màn **Nhật ký** nếu muốn. Cache tự mất hiệu lực khi đổi bộ trường
+của tab.
 
 Lưu tại `%APPDATA%/tung-sp-app/fields.config.json` (`fields` = bộ chung, `byTab` = theo tab).
 
