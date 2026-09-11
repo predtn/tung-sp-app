@@ -328,7 +328,7 @@ export default function FieldsEditor({
       )}
 
       {orphanTabs.length > 0 && (
-        <p style={{ fontSize: 12, color: '#856404', marginTop: -4 }}>
+        <p className="hint text-warn" style={{ marginTop: -4 }}>
           {orphanTabs.length} tab có cấu hình trường nhưng không còn trên Google
           Sheet:{' '}
           {orphanTabs.map((n, i) => (
@@ -346,7 +346,7 @@ export default function FieldsEditor({
         </p>
       )}
 
-      <p style={{ fontSize: 12, color: '#6c757d' }}>
+      <p className="hint">
         {isShared ? (
           <>
             Bộ trường <strong>chung</strong>: dùng khi quét vào tab chưa cấu hình
@@ -366,7 +366,7 @@ export default function FieldsEditor({
         ngày.
       </p>
 
-      <p style={{ fontSize: 12, color: '#6c757d' }}>
+      <p className="hint">
         <strong>Vai trò</strong> giúp app gộp nhiều đợt khám của cùng bệnh nhân:
         <br />
         • <strong>Định danh</strong> (chỉ 1 trường): mã bệnh nhân. Các hồ sơ trùng
@@ -383,7 +383,7 @@ export default function FieldsEditor({
       </p>
 
       {loading ? (
-        <p style={{ color: '#6c757d' }}>Đang tải bộ trường…</p>
+        <p className="muted">Đang tải bộ trường…</p>
       ) : (
         <>
           <table>
@@ -433,10 +433,9 @@ export default function FieldsEditor({
                     </select>
                   </td>
                   <td>
-                    <div className="row" style={{ gap: 4, flexWrap: 'nowrap' }}>
+                    <div className="row" style={{ gap: 3, flexWrap: 'nowrap' }}>
                       <button
-                        className="ghost"
-                        style={{ padding: '2px 8px' }}
+                        className="ghost sm"
                         onClick={() => moveRow(i, -1)}
                         disabled={i === 0}
                         title="Di chuyển lên"
@@ -444,8 +443,7 @@ export default function FieldsEditor({
                         ↑
                       </button>
                       <button
-                        className="ghost"
-                        style={{ padding: '2px 8px' }}
+                        className="ghost sm"
                         onClick={() => moveRow(i, 1)}
                         disabled={i === rows.length - 1}
                         title="Di chuyển xuống"
@@ -453,8 +451,8 @@ export default function FieldsEditor({
                         ↓
                       </button>
                       <button
-                        className="secondary"
-                        style={{ padding: '2px 8px' }}
+                        className="link-btn danger"
+                        style={{ marginLeft: 2 }}
                         onClick={() => removeRow(i)}
                         title="Xoá trường"
                       >
@@ -484,7 +482,7 @@ export default function FieldsEditor({
           </div>
 
           {isOrphan && (
-            <p style={{ fontSize: 12, color: '#856404', marginTop: 8 }}>
+            <p className="hint text-warn" style={{ marginTop: 8 }}>
               Tab "{selectedTab}" không còn trên Google Sheet. Tạo lại tab cùng
               tên để dùng lại cấu hình này, hoặc xoá cấu hình ở phần cảnh báo trên.
             </p>

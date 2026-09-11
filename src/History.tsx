@@ -81,10 +81,10 @@ export default function History() {
       </div>
 
       {entries.length === 0 ? (
-        <p style={{ color: '#6c757d' }}>Chưa có lần import nào.</p>
+        <p className="muted">Chưa có lần import nào.</p>
       ) : (
         <>
-          <p style={{ fontSize: 13, color: '#6c757d' }}>
+          <p className="hint">
             {entries.length} lần import · tổng {totalRows} dòng · ước tính $
             {totalUsd.toFixed(4)}
           </p>
@@ -104,11 +104,11 @@ export default function History() {
                   <td>{new Date(e.at).toLocaleString('vi-VN')}</td>
                   <td>{e.tab}</td>
                   <td>{e.rows}</td>
-                  <td style={{ fontSize: 12, color: '#6c757d' }}>
+                  <td className="hint">
                     {e.files.slice(0, 3).join(', ')}
                     {e.files.length > 3 && ` …+${e.files.length - 3}`}
                   </td>
-                  <td style={{ fontSize: 12, color: '#6c757d' }}>
+                  <td className="hint">
                     ${e.estimatedUsd.toFixed(4)}
                     <div>{e.totalTokens.toLocaleString('vi-VN')} token</div>
                   </td>

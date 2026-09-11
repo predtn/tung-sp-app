@@ -16,11 +16,16 @@ export interface PdfContent {
   text: string;
   // true nếu PDF gần như không có text -> có thể là bản scan, cần OCR bằng ảnh
   looksScanned: boolean;
-  // ảnh PNG base64 của tối đa N trang đầu (dùng khi looksScanned)
+  // ảnh PNG base64 của tất cả các trang (dùng khi looksScanned)
   pageImages: string[];
+  // tổng số trang thực tế của file (để cảnh báo khi file rất dài)
+  totalPages: number;
 }
 
-const MAX_PAGES = 4;
+// Không giới hạn cứng số trang quét — hồ sơ bệnh nhân dài (nhiều đợt khám gộp
+// 1 file) cần đọc hết. Chỉ dùng ngưỡng này để CẢNH BÁO khi file quá dài
+// (PDF scan nhiều trang tốn rất nhiều token ảnh), không chặn.
+export const LONG_FILE_WARNING_PAGES = 20;
 
 export async function extractPdf(filePath: string): Promise<PdfContent> {
   const pdfjs = await getPdfjs();
@@ -28,7 +33,7 @@ export async function extractPdf(filePath: string): Promise<PdfContent> {
   const doc = await pdfjs.getDocument({ data, useSystemFonts: true }).promise;
 
   let fullText = '';
-  const numPages = Math.min(doc.numPages, MAX_PAGES);
+  const numPages = doc.numPages;
 
   for (let i = 1; i <= numPages; i++) {
     const page = await doc.getPage(i);
@@ -54,6 +59,7 @@ export async function extractPdf(filePath: string): Promise<PdfContent> {
     text: trimmed,
     looksScanned,
     pageImages,
+    totalPages: numPages,
   };
 }
 

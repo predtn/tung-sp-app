@@ -143,6 +143,16 @@ Nút **Nhật ký** trên thanh trên cùng: xem lại các lần import trướ
 số dòng, danh sách file, chi phí ước tính. Lưu tại `%APPDATA%/tung-sp-app/import-history.json`,
 giữ 200 lần gần nhất.
 
+## Số trang PDF được quét
+
+App đọc **toàn bộ số trang** của mỗi file PDF, không giới hạn cứng — cần thiết vì một file
+có thể gộp nhiều đợt khám. Với file dài (> 20 trang), sau khi quét app cảnh báo trong toast
+tổng kết (kèm số trang) vì:
+
+- PDF chữ (text): đọc hết vẫn rẻ.
+- PDF scan (ảnh): mỗi trang là 1 ảnh gửi cho AI → file càng nhiều trang càng tốn token. Nên
+  kiểm tra hồ sơ trước khi nạp nếu nghi ngờ file quá dài / có trang thừa không cần thiết.
+
 ## Bảo mật
 
 - API key và token Google lưu **cục bộ** trên máy bạn (`%APPDATA%/tung-sp-app/`).

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ExtractedRecord, FieldDef } from '../electron/types';
 import type { CellIssue } from './validation';
 import GroupedReview from './GroupedReview';
@@ -77,39 +77,34 @@ export default function ReviewTable({
 
   return (
     <div
-      className={readOnly ? 'review-readonly' : undefined}
-      style={readOnly ? { pointerEvents: 'none', opacity: 0.6 } : undefined}
+      style={readOnly ? { pointerEvents: 'none', opacity: 0.55 } : undefined}
     >
-      <div
-        className="row"
-        style={{ justifyContent: 'flex-end', marginBottom: 10, gap: 6 }}
-      >
-        <span style={{ fontSize: 12, color: '#6c757d', marginRight: 'auto' }}>
+      <div className="review-toolbar">
+        <span className="review-count">
           {records.length} hồ sơ · {fields.length} trường
         </span>
-        {hasId && (
+        <div className="seg">
+          {hasId && (
+            <button
+              className={mode === 'grouped' ? 'active' : ''}
+              onClick={() => setMode('grouped')}
+            >
+              Theo bệnh nhân
+            </button>
+          )}
           <button
-            className={mode === 'grouped' ? '' : 'ghost'}
-            style={{ padding: '4px 12px' }}
-            onClick={() => setMode('grouped')}
+            className={mode === 'table' ? 'active' : ''}
+            onClick={() => setMode('table')}
           >
-            Theo bệnh nhân
+            Bảng
           </button>
-        )}
-        <button
-          className={mode === 'table' ? '' : 'ghost'}
-          style={{ padding: '4px 12px' }}
-          onClick={() => setMode('table')}
-        >
-          Bảng
-        </button>
-        <button
-          className={mode === 'cards' ? '' : 'ghost'}
-          style={{ padding: '4px 12px' }}
-          onClick={() => setMode('cards')}
-        >
-          Thẻ
-        </button>
+          <button
+            className={mode === 'cards' ? 'active' : ''}
+            onClick={() => setMode('cards')}
+          >
+            Thẻ
+          </button>
+        </div>
       </div>
 
       {mode === 'grouped' ? (
@@ -159,17 +154,22 @@ function SourceFileLink({
   record: ExtractedRecord;
   onOpenPdf: (path: string, name: string) => void;
 }) {
-  if (!record.sourcePath) return <>{record.sourceFile}</>;
+  if (!record.sourcePath)
+    return <span className="src-file">{record.sourceFile}</span>;
   return (
     <button
-      className="link-btn"
-      title={'Xem file PDF gốc để đối chiếu\n' + record.sourcePath}
+      className="link-btn src-file"
+      title={'Xem file PDF gốc để đối chiếu\n' + record.sourceFile}
       onClick={() => onOpenPdf(record.sourcePath, record.sourceFile)}
     >
       📄 {record.sourceFile}
     </button>
   );
 }
+
+// độ rộng mặc định từng loại cột (px)
+const DEFAULT_W = { idx: 34, field: 150, src: 200, cost: 96, del: 40 };
+const MIN_W = 56;
 
 function TableView({
   fields,
@@ -179,18 +179,90 @@ function TableView({
   removeRow,
   onOpenPdf,
 }: SubProps) {
+  // khoá lưu độ rộng theo tổ hợp các trường (đổi bộ trường -> reset)
+  const storeKey = 'rxscan.colw.' + fields.map((f) => f.key).join(',');
+  const colIds = ['__idx', ...fields.map((f) => f.key), '__src', '__cost', '__del'];
+
+  const [widths, setWidths] = useState<Record<string, number>>(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem(storeKey) || '{}');
+      if (saved && typeof saved === 'object') return saved;
+    } catch {
+      /* ignore */
+    }
+    return {};
+  });
+
+  function widthOf(id: string): number {
+    if (widths[id]) return widths[id];
+    if (id === '__idx') return DEFAULT_W.idx;
+    if (id === '__src') return DEFAULT_W.src;
+    if (id === '__cost') return DEFAULT_W.cost;
+    if (id === '__del') return DEFAULT_W.del;
+    return DEFAULT_W.field;
+  }
+
+  const dragRef = useRef<{ id: string; startX: number; startW: number } | null>(null);
+
+  function onHandleDown(e: React.MouseEvent, id: string) {
+    e.preventDefault();
+    dragRef.current = { id, startX: e.clientX, startW: widthOf(id) };
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+    window.addEventListener('mousemove', onDragMove);
+    window.addEventListener('mouseup', onDragEnd);
+  }
+  function onDragMove(e: MouseEvent) {
+    const d = dragRef.current;
+    if (!d) return;
+    const w = Math.max(MIN_W, d.startW + (e.clientX - d.startX));
+    setWidths((prev) => ({ ...prev, [d.id]: w }));
+  }
+  function onDragEnd() {
+    document.body.style.cursor = '';
+    document.body.style.userSelect = '';
+    window.removeEventListener('mousemove', onDragMove);
+    window.removeEventListener('mouseup', onDragEnd);
+    dragRef.current = null;
+    setWidths((prev) => {
+      try {
+        localStorage.setItem(storeKey, JSON.stringify(prev));
+      } catch {
+        /* ignore */
+      }
+      return prev;
+    });
+  }
+
   return (
     <div style={{ overflowX: 'auto' }}>
-      <table>
+      <table className="resizable-table">
+        <colgroup>
+          {colIds.map((id) => (
+            <col key={id} style={{ width: widthOf(id) }} />
+          ))}
+        </colgroup>
         <thead>
           <tr>
-            <th style={{ width: 30 }}>#</th>
+            <th>#</th>
             {fields.map((f) => (
-              <th key={f.key}>{f.label}</th>
+              <th key={f.key}>
+                <span className="th-label">{f.label}</span>
+                <span
+                  className="col-resizer"
+                  onMouseDown={(e) => onHandleDown(e, f.key)}
+                />
+              </th>
             ))}
-            <th>File nguồn</th>
-            <th style={{ width: 90 }}>Chi phí</th>
-            <th style={{ width: 40 }}></th>
+            <th>
+              File nguồn
+              <span
+                className="col-resizer"
+                onMouseDown={(e) => onHandleDown(e, '__src')}
+              />
+            </th>
+            <th>Chi phí</th>
+            <th></th>
           </tr>
         </thead>
         <tbody>
@@ -223,12 +295,12 @@ function TableView({
               <td>
                 <SourceFileLink record={r} onOpenPdf={onOpenPdf} />
                 {r.error && (
-                  <div style={{ color: '#b71c1c', fontSize: 11 }}>⚠ {r.error}</div>
+                  <div className="cell-note danger">⚠ {r.error}</div>
                 )}
               </td>
-              <td style={{ fontSize: 12, color: '#6c757d' }}>
+              <td className="hint">
                 {r.fromCache ? (
-                  <span style={{ color: '#1e8449' }}>đã quét trước · miễn phí</span>
+                  <span className="text-ok">đã quét trước · miễn phí</span>
                 ) : r.usage ? (
                   <>
                     ${r.usage.estimatedUsd.toFixed(4)}
@@ -238,10 +310,10 @@ function TableView({
                   '—'
                 )}
               </td>
-              <td>
+              <td style={{ textAlign: 'center' }}>
                 <button
-                  className="secondary"
-                  style={{ padding: '2px 8px' }}
+                  className="link-btn danger"
+                  title="Xoá dòng này"
                   onClick={() => removeRow(i)}
                 >
                   ✕
@@ -273,8 +345,7 @@ function CardsView({
               <SourceFileLink record={r} onOpenPdf={onOpenPdf} />
             </span>
             <button
-              className="secondary"
-              style={{ padding: '2px 8px' }}
+              className="link-btn danger"
               onClick={() => removeRow(i)}
               title="Xoá hồ sơ này"
             >
@@ -309,7 +380,7 @@ function CardsView({
           )}
 
           {r.fromCache ? (
-            <div className="record-card-usage" style={{ color: '#1e8449' }}>
+            <div className="record-card-usage text-ok">
               đã quét trước đó · không tính phí
             </div>
           ) : r.usage ? (

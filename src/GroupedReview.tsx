@@ -20,7 +20,7 @@ interface Props {
 }
 
 const TREND_ICON = { up: '▲', down: '▼', same: '=' } as const;
-const TREND_COLOR = { up: '#c0392b', down: '#1e8449', same: '#6c757d' } as const;
+const TREND_CLASS = { up: 'trend-up', down: 'trend-down', same: 'trend-same' } as const;
 
 export default function GroupedReview({
   fields,
@@ -150,8 +150,8 @@ export default function GroupedReview({
                         Đợt {vi + 1}
                         {dupVisits.has(vi) && (
                           <span
+                            className="text-danger"
                             title="Ngày khám trùng với đợt khác — có thể quét trùng file"
-                            style={{ color: '#c0392b' }}
                           >
                             {' '}
                             ⚠
@@ -190,8 +190,7 @@ export default function GroupedReview({
                               />
                               {trend && (
                                 <span
-                                  className="trend"
-                                  style={{ color: TREND_COLOR[trend] }}
+                                  className={'trend ' + TREND_CLASS[trend]}
                                   title={
                                     trend === 'up'
                                       ? 'Tăng so với đợt trước'
@@ -229,13 +228,13 @@ export default function GroupedReview({
                             <span style={{ fontSize: 12 }}>{r.sourceFile}</span>
                           )}
                           {r.error && (
-                            <div style={{ color: '#b71c1c', fontSize: 11 }}>
+                            <div className="cell-note danger">
                               ⚠ {r.error}
                             </div>
                           )}
                           <button
-                            className="link-btn"
-                            style={{ color: '#c0392b', marginLeft: 6 }}
+                            className="link-btn danger"
+                            style={{ marginLeft: 8 }}
                             onClick={() => removeRecord(gIdx)}
                             title="Xoá đợt khám này"
                           >

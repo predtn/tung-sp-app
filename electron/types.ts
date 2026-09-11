@@ -35,6 +35,9 @@ export interface ExtractedRecord {
   error?: string;
   /** true nếu kết quả lấy từ cache (file đã quét trước đó) -> không tính phí */
   fromCache?: boolean;
+  /** tổng số trang PDF gốc, kèm cờ báo file dài (đã quét hết, chỉ để cảnh báo chi phí) */
+  totalPages?: number;
+  isLongFile?: boolean;
   usage?: {
     promptTokens: number;
     completionTokens: number;

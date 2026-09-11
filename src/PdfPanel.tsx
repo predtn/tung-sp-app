@@ -77,35 +77,27 @@ export default function PdfPanel({ filePath, fileName, onClose, onOpenExternal }
         </strong>
         <div className="row" style={{ gap: 4, flexWrap: 'nowrap' }}>
           <button
-            className="ghost"
-            style={{ padding: '2px 8px' }}
+            className="ghost sm"
             onClick={() => setScale((s) => Math.max(0.5, +(s - 0.2).toFixed(2)))}
             title="Thu nhỏ"
           >
             −
           </button>
           <button
-            className="ghost"
-            style={{ padding: '2px 8px' }}
+            className="ghost sm"
             onClick={() => setScale((s) => Math.min(3, +(s + 0.2).toFixed(2)))}
             title="Phóng to"
           >
             +
           </button>
           <button
-            className="ghost"
-            style={{ padding: '2px 8px' }}
+            className="ghost sm"
             onClick={() => onOpenExternal(filePath)}
             title="Mở bằng trình đọc PDF ngoài"
           >
             ↗
           </button>
-          <button
-            className="secondary"
-            style={{ padding: '2px 10px' }}
-            onClick={onClose}
-            title="Đóng panel"
-          >
+          <button className="ghost sm" onClick={onClose} title="Đóng panel">
             ✕
           </button>
         </div>

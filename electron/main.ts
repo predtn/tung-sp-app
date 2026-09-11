@@ -11,7 +11,7 @@ import {
   configuredTabs,
   deleteFieldsForTab,
 } from './config';
-import { extractPdf } from './pdf';
+import { extractPdf, LONG_FILE_WARNING_PAGES } from './pdf';
 import { extractRecord } from './extract';
 import * as gs from './google';
 import { loadHistory, addHistory, clearHistory } from './history';
@@ -28,10 +28,12 @@ import type { AppConfig, ExtractedRecord, FieldDef } from './types';
 const isDev = !!process.env.VITE_DEV_SERVER_URL;
 
 const APP_NAME = 'RxScan';
-// dev: chạy từ dist-electron/, prod: resources được đóng gói kèm (extraResources)
+// dev: chạy từ dist-electron/, prod: resources được đóng gói kèm (extraResources).
+// Dùng .ico (đa kích thước) cho icon cửa sổ/taskbar trên Windows — PNG đơn kích
+// thước đôi khi bị Windows fallback về icon mặc định ở taskbar.
 const ICON_PATH = isDev
-  ? path.join(__dirname, '../assets/icon.png')
-  : path.join(process.resourcesPath, 'assets/icon.png');
+  ? path.join(__dirname, '../assets/icon.ico')
+  : path.join(process.resourcesPath, 'assets/icon.ico');
 
 function createWindow() {
   const win = new BrowserWindow({
@@ -70,6 +72,11 @@ function createWindow() {
 // Tên hiển thị của app đổi được, NHƯNG thư mục lưu dữ liệu phải cố định,
 // nếu không mỗi lần đổi tên là mất hết cấu hình đã lưu.
 app.setName(APP_NAME);
+// Windows: taskbar gộp/gán icon theo AppUserModelID, phải khớp appId trong
+// electron-builder.json — thiếu dòng này taskbar hay rơi về icon mặc định.
+if (process.platform === 'win32') {
+  app.setAppUserModelId('com.tung.rxscan');
+}
 const FIXED_USER_DATA = path.join(app.getPath('appData'), 'tung-sp-app');
 app.setPath('userData', FIXED_USER_DATA);
 
@@ -257,7 +264,12 @@ function registerIpc() {
       }
       const pdf = await extractPdf(filePath);
       const rec = await extractRecord(pdf, fields, cfg.openaiApiKey, cfg.openaiModel);
-      const out: ExtractedRecord = { ...rec, sourcePath: filePath };
+      const out: ExtractedRecord = {
+        ...rec,
+        sourcePath: filePath,
+        totalPages: pdf.totalPages,
+        isLongFile: pdf.totalPages > LONG_FILE_WARNING_PAGES,
+      };
       putCached(hash, out, fields, cfg.openaiModel);
       return out;
     } catch (err: any) {

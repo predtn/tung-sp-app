@@ -8,11 +8,16 @@
   "win": {
     "target": ["nsis"],
     "icon": "assets/icon.ico",
-    "signAndEditExecutable": false
+    "signAndEditExecutable": true,
+    "signDlls": false
   },
   "nsis": {
     "oneClick": false,
     "allowToChangeInstallationDirectory": true,
-    "shortcutName": "RxScan"
+    "shortcutName": "RxScan",
+    "installerIcon": "assets/icon.ico",
+    "uninstallerIcon": "assets/icon.ico",
+    "createDesktopShortcut": true,
+    "createStartMenuShortcut": true
   }
 }

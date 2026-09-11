@@ -70,7 +70,7 @@ export default function Settings({
               gpt-4.1 — chính xác cao nhất, đắt hơn nhiều
             </option>
           </select>
-          <span style={{ fontSize: 12, color: '#6c757d' }}>
+          <span className="hint">
             Bác sĩ đã soát từng ô ở bước 2 nên sai nhỏ của model rẻ không nghiêm
             trọng. Đổi lên gpt-5-mini / gpt-4.1 nếu hồ sơ khó / scan mờ hay bị sai.
           </span>
@@ -118,7 +118,7 @@ export default function Settings({
           )}
         </div>
         {!canSignIn && !signedIn && (
-          <p style={{ fontSize: 12, color: '#b71c1c' }}>
+          <p className="hint text-danger">
             Điền đủ Client ID, Client Secret và Spreadsheet ID để đăng nhập được.
           </p>
         )}

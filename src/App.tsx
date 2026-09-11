@@ -166,9 +166,17 @@ export default function App() {
 
     const errs = out.filter((r) => r.error).length;
     const cached = out.filter((r) => r.fromCache).length;
+    const longFiles = out.filter((r) => r.isLongFile);
     const parts = [`Xong ${out.length} file`];
     if (cached > 0) parts.push(`${cached} file lấy từ bản đã quét (không tính phí)`);
     if (errs > 0) parts.push(`${errs} file có lỗi (xem ô đỏ)`);
+    if (longFiles.length > 0) {
+      parts.push(
+        `${longFiles.length} file dài (${longFiles
+          .map((r) => `${r.sourceFile}: ${r.totalPages} trang`)
+          .join(', ')}) — đã quét hết nhưng có thể tốn nhiều token hơn`
+      );
+    }
     showToast(parts.join(' · '));
   }
 
@@ -331,7 +339,7 @@ export default function App() {
     await doImport(ordered);
   }
 
-  if (!config) return <div style={{ padding: 20 }}>Đang tải…</div>;
+  if (!config) return <div className="loading-screen">Đang tải…</div>;
 
   return (
     <div className="app">
@@ -339,21 +347,18 @@ export default function App() {
         <img
           src="./assets/icon.png"
           alt=""
-          width={24}
-          height={24}
-          style={{ borderRadius: 4 }}
+          width={22}
+          height={22}
+          style={{ borderRadius: 4, display: 'block' }}
         />
         <h1>RxScan</h1>
         <span className={'badge ' + (signedIn ? 'ok' : 'warn')}>
-          {signedIn ? 'Google: đã kết nối' : 'Google: chưa kết nối'}
+          {signedIn ? 'Google đã kết nối' : 'Google chưa kết nối'}
         </span>
         {view === 'main' ? (
           <>
-            <button className="secondary" onClick={() => setView('history')}>
-              Nhật ký
-            </button>
+            <button onClick={() => setView('history')}>Nhật ký</button>
             <button
-              className="secondary"
               onClick={() => {
                 if (signedIn) refreshTabs(true);
                 setView('settings');
@@ -363,9 +368,7 @@ export default function App() {
             </button>
           </>
         ) : (
-          <button className="secondary" onClick={() => setView('main')}>
-            Quay lại
-          </button>
+          <button onClick={() => setView('main')}>← Quay lại</button>
         )}
       </div>
 
@@ -401,8 +404,8 @@ export default function App() {
               <h2>1. Chọn tab đích &amp; nạp file PDF</h2>
 
               {signedIn ? (
-                <div className="field" style={{ maxWidth: 360 }}>
-                  <label>Tab sẽ import vào</label>
+                <div className="field" style={{ maxWidth: 380 }}>
+                  <label>Tab đích trên Google Sheet</label>
                   <select
                     value={selectedTab}
                     disabled={(records.length > 0 && !!selectedTab) || processing}
@@ -415,16 +418,16 @@ export default function App() {
                       </option>
                     ))}
                   </select>
-                  <span style={{ fontSize: 12, color: '#6c757d' }}>
+                  <span className="hint">
                     {records.length > 0
-                      ? 'Đã quét theo tab này. Bấm "Làm lại từ đầu" ở bước 3 để đổi tab.'
-                      : 'AI sẽ quét theo bộ trường đã cấu hình cho tab này.'}
+                      ? 'Đã quét theo tab này. Bấm “Làm lại từ đầu” ở bước 3 để đổi tab.'
+                      : 'AI quét theo bộ trường đã cấu hình cho tab này.'}
                   </span>
                 </div>
               ) : (
-                <p style={{ fontSize: 13, color: '#856404' }}>
+                <p className="hint text-warn" style={{ marginTop: 0 }}>
                   Chưa đăng nhập Google — sẽ quét theo bộ trường chung, chọn tab
-                  đích ở bước import.
+                  đích ở bước 3.
                 </p>
               )}
 
@@ -437,8 +440,9 @@ export default function App() {
                 onDragLeave={() => setDrag(false)}
                 onDrop={onDrop}
               >
-                Kéo-thả nhiều file PDF vào đây, hoặc{' '}
-                <button className="ghost" onClick={onPick} disabled={processing}>
+                <div style={{ fontSize: 24, marginBottom: 6 }}>📄</div>
+                Kéo-thả file PDF vào đây, hoặc{' '}
+                <button className="ghost sm" onClick={onPick} disabled={processing}>
                   chọn file
                 </button>
               </div>
@@ -490,7 +494,7 @@ export default function App() {
                       </div>
                     </div>
                   )}
-                  <p style={{ fontSize: 13, color: '#6c757d', marginTop: 10 }}>
+                  <p className="hint" style={{ marginTop: 10 }}>
                     Tổng chi phí OpenAI ước tính:{' '}
                     <strong>
                       $
@@ -551,7 +555,7 @@ export default function App() {
                         <strong>{selectedTab}</strong>
                       </span>
                     ) : (
-                      <span style={{ color: '#856404' }}>
+                      <span className="text-warn">
                         Chưa chọn tab đích — bấm "Làm lại từ đầu" rồi chọn ở bước 1.
                       </span>
                     )}
