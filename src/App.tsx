@@ -11,6 +11,7 @@ import FinalPreview from './FinalPreview';
 import { finalTabName } from '../electron/tabNaming';
 import ConfirmDialogHost, { confirmDialog } from './ConfirmDialog';
 import CustomSelect from './CustomSelect';
+import GoogleSettings from './GoogleSettings';
 
 type View = 'main' | 'settings' | 'history';
 
@@ -19,6 +20,7 @@ export default function App() {
   const [config, setConfig] = useState<AppConfig | null>(null);
   const [fields, setFields] = useState<FieldDef[]>([]);
   const [signedIn, setSignedIn] = useState(false);
+  const [showGoogleSettings, setShowGoogleSettings] = useState(false);
 
   const [records, setRecords] = useState<ExtractedRecord[]>([]);
   const [processing, setProcessing] = useState(false);
@@ -543,9 +545,12 @@ export default function App() {
           style={{ borderRadius: 4, display: 'block' }}
         />
         <h1>RxScan</h1>
-        <span className={'badge ' + (signedIn ? 'ok' : 'warn')}>
+        <button
+          className={'badge-btn ' + (signedIn ? 'ok' : 'warn')}
+          onClick={() => setShowGoogleSettings(true)}
+        >
           {signedIn ? 'Google đã kết nối' : 'Google chưa kết nối'}
-        </span>
+        </button>
         {view === 'main' ? (
           <>
             <button onClick={() => setView('history')}>Nhật ký</button>
@@ -568,26 +573,14 @@ export default function App() {
           <History />
         ) : view === 'settings' ? (
           <Settings
-            config={config}
             fields={fields}
             signedIn={signedIn}
-            onSave={async (c) => {
-              await window.api.setConfig(c);
-              setConfig(c);
-              showToast('Đã lưu cài đặt.');
-            }}
             onSaveSharedFields={async (f) => {
               const saved = await window.api.setFields(f);
               setFields(saved);
               return saved;
             }}
             onTabsChanged={() => refreshTabs(true)}
-            onSignIn={onSignIn}
-            onSignOut={async () => {
-              await window.api.googleSignOut();
-              setSignedIn(false);
-              setTabs([]);
-            }}
           />
         ) : (
           <>
@@ -867,6 +860,25 @@ export default function App() {
             </div>
           </div>
         </div>
+      )}
+
+      {showGoogleSettings && config && (
+        <GoogleSettings
+          config={config}
+          signedIn={signedIn}
+          onSave={async (c) => {
+            await window.api.setConfig(c);
+            setConfig(c);
+            showToast('Đã lưu cài đặt.');
+          }}
+          onSignIn={onSignIn}
+          onSignOut={async () => {
+            await window.api.googleSignOut();
+            setSignedIn(false);
+            setTabs([]);
+          }}
+          onClose={() => setShowGoogleSettings(false)}
+        />
       )}
 
       <ConfirmDialogHost />

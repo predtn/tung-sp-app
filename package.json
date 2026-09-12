@@ -1,7 +1,7 @@
 {
   "name": "tung-sp-app",
   "productName": "RxScan",
-  "version": "0.1.0",
+  "version": "0.1.6",
   "description": "RxScan — quét hồ sơ bệnh nhân từ PDF và import vào Google Sheets",
   "main": "dist-electron/main.js",
   "author": "predzxcvn@gmail.com",

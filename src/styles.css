@@ -100,6 +100,26 @@ a:hover { text-decoration: underline; text-underline-offset: 2px; }
   box-shadow: none;
 }
 .topbar button:active { background: rgba(255, 255, 255, .12); transform: none; }
+.topbar .badge-btn,
+.topbar .badge-btn:hover,
+.topbar .badge-btn:active {
+  padding: 3px 9px;
+  font-size: 12px;
+  background: var(--surface-3);
+  color: var(--text-muted);
+}
+.topbar .badge-btn.ok,
+.topbar .badge-btn.ok:hover,
+.topbar .badge-btn.ok:active {
+  background: var(--ok-soft);
+  color: var(--ok);
+}
+.topbar .badge-btn.warn,
+.topbar .badge-btn.warn:hover,
+.topbar .badge-btn.warn:active {
+  background: var(--warn-soft);
+  color: var(--warn);
+}
 
 .body {
   flex: 1;
@@ -410,6 +430,44 @@ td.error, td.error .auto-textarea { color: var(--danger); }
 .badge.ok { background: var(--ok-soft); color: var(--ok); }
 .badge.warn { background: var(--warn-soft); color: var(--warn); }
 
+.badge-btn,
+.badge-btn:hover,
+.badge-btn:active {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 9px;
+  border: none;
+  border-radius: var(--r-pill);
+  font-size: 12px;
+  font-weight: 550;
+  font-family: inherit;
+  background: var(--surface-3);
+  color: var(--text-muted);
+  cursor: pointer;
+  transform: none;
+  transition: none;
+}
+.badge-btn::before {
+  content: '';
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: .8;
+}
+.badge-btn.ok, .badge-btn.ok:hover, .badge-btn.ok:active {
+  background: var(--ok-soft); color: var(--ok);
+}
+.badge-btn.warn, .badge-btn.warn:hover, .badge-btn.warn:active {
+  background: var(--warn-soft); color: var(--warn);
+}
+.badge-btn:hover { opacity: .82; }
+.badge-btn:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
+  box-shadow: none;
+}
+
 /* =========================================================
    Dropzone
    ========================================================= */
@@ -474,6 +532,20 @@ td.error, td.error .auto-textarea { color: var(--danger); }
 @keyframes modal-pop { from { transform: translateY(6px) scale(.98); opacity: 0; } }
 .modal h3 { margin: 0 0 12px; font-size: 16px; font-weight: 650; }
 .modal p { color: var(--text-muted); }
+
+.settings-section {
+  padding: 18px 0;
+  border-top: 1px solid var(--border);
+}
+.settings-section:first-of-type { border-top: none; padding-top: 4px; }
+.settings-section > h4 {
+  margin: 0 0 14px;
+  font-size: 13px;
+  font-weight: 650;
+  letter-spacing: .02em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
 .cache-file-list {
   margin: 10px 0;
   padding: 10px 14px;
