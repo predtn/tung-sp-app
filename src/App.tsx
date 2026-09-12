@@ -10,6 +10,7 @@ import { buildFinalRows } from './finalRows';
 import FinalPreview from './FinalPreview';
 import { finalTabName } from '../electron/tabNaming';
 import ConfirmDialogHost, { confirmDialog } from './ConfirmDialog';
+import CustomSelect from './CustomSelect';
 
 type View = 'main' | 'settings' | 'history';
 
@@ -233,7 +234,7 @@ export default function App() {
     setDrag(false);
     const paths = Array.from(e.dataTransfer.files)
       .filter((f) => f.name.toLowerCase().endsWith('.pdf'))
-      .map((f) => (f as File & { path: string }).path);
+      .map((f) => window.api.getPathForFile(f));
     startFiles(paths);
   }
 
@@ -596,18 +597,16 @@ export default function App() {
               {signedIn ? (
                 <div className="field" style={{ maxWidth: 380 }}>
                   <label>Tab đích trên Google Sheet</label>
-                  <select
+                  <CustomSelect
                     value={selectedTab}
                     disabled={(records.length > 0 && !!selectedTab) || processing}
-                    onChange={(e) => setSelectedTab(e.target.value)}
-                  >
-                    <option value="">— Chọn tab —</option>
-                    {tabs.map((t) => (
-                      <option key={t.sheetId} value={t.title}>
-                        {t.title}
-                      </option>
-                    ))}
-                  </select>
+                    onChange={setSelectedTab}
+                    placeholder="— Chọn tab —"
+                    options={[
+                      { value: '', label: '— Chọn tab —' },
+                      ...tabs.map((t) => ({ value: t.title, label: t.title })),
+                    ]}
+                  />
                   <span className="hint">
                     {records.length > 0
                       ? 'Đã quét theo tab này. Bấm “Làm lại từ đầu” ở bước 3 để đổi tab.'

@@ -8,6 +8,7 @@ import type {
 import type { TabSyncPlan } from '../electron/google';
 import { finalTabName } from '../electron/tabNaming';
 import { confirmDialog } from './ConfirmDialog';
+import CustomSelect from './CustomSelect';
 
 const ROLE_LABEL: Record<FieldRole, string> = {
   id: 'Định danh (mã BN)',
@@ -358,26 +359,28 @@ export default function FieldsEditor({
       <div className="field" style={{ maxWidth: 480 }}>
         <label>Áp dụng cho</label>
         <div className="row" style={{ flexWrap: 'nowrap' }}>
-          <select
+          <CustomSelect
             value={selectedTab}
             style={{ flex: 1 }}
-            onChange={(e) => setSelectedTab(e.target.value)}
-          >
-            <option value={SHARED}>Bộ trường chung (mặc định cho tab mới)</option>
-            {!signedIn && (
-              <option disabled>— Đăng nhập Google để chọn tab —</option>
-            )}
-            {tabs.map((t) => (
-              <option key={t.sheetId} value={t.title}>
-                Tab: {t.title}
-              </option>
-            ))}
-            {orphanTabs.map((n) => (
-              <option key={'orphan-' + n} value={n}>
-                Tab: {n} (không còn trên Sheet)
-              </option>
-            ))}
-          </select>
+            onChange={setSelectedTab}
+            options={[
+              { value: SHARED, label: 'Bộ trường chung (mặc định cho tab mới)' },
+              ...(!signedIn
+                ? [
+                    {
+                      value: '__no_google__',
+                      label: '— Đăng nhập Google để chọn tab —',
+                      disabled: true,
+                    },
+                  ]
+                : []),
+              ...tabs.map((t) => ({ value: t.title, label: `Tab: ${t.title}` })),
+              ...orphanTabs.map((n) => ({
+                value: n,
+                label: `Tab: ${n} (không còn trên Sheet)`,
+              })),
+            ]}
+          />
           {signedIn && (
             <button
               className="ghost"
@@ -512,41 +515,35 @@ export default function FieldsEditor({
                     />
                   </td>
                   <td>
-                    <select
+                    <CustomSelect
                       value={f.role ?? 'varying'}
-                      onChange={(e) => setRole(i, e.target.value as FieldRole)}
-                    >
-                      {ROLE_ORDER.map((r) => (
-                        <option key={r} value={r}>
-                          {ROLE_LABEL[r]}
-                        </option>
-                      ))}
-                    </select>
+                      onChange={(v) => setRole(i, v as FieldRole)}
+                      options={ROLE_ORDER.map((r) => ({
+                        value: r,
+                        label: ROLE_LABEL[r],
+                      }))}
+                    />
                   </td>
                   <td>
                     {(f.role ?? 'varying') === 'varying' ? (
-                      <select
+                      <CustomSelect
                         value={f.aggregate ?? 'none'}
-                        onChange={(e) =>
-                          update(i, {
-                            aggregate: e.target.value as AggregateMode,
-                          })
+                        onChange={(v) =>
+                          update(i, { aggregate: v as AggregateMode })
                         }
-                      >
-                        {AGGREGATE_ORDER.map((a) => (
-                          <option key={a} value={a}>
-                            {AGGREGATE_LABEL[a]}
-                          </option>
-                        ))}
-                        {/* dữ liệu cũ có thể còn 'latest'/'earliest' đã ngừng hỗ trợ
-                            -> hiện tạm để không tự đổi giá trị field khi user chưa
-                            động vào; chọn lại 'Mặc định' hoặc giá trị khác để xoá. */}
-                        {(f.aggregate === 'latest' || f.aggregate === 'earliest') && (
-                          <option value={f.aggregate}>
-                            {AGGREGATE_LABEL[f.aggregate]}
-                          </option>
-                        )}
-                      </select>
+                        options={[
+                          ...AGGREGATE_ORDER.map((a) => ({
+                            value: a,
+                            label: AGGREGATE_LABEL[a],
+                          })),
+                          // dữ liệu cũ có thể còn 'latest'/'earliest' đã ngừng hỗ
+                          // trợ -> hiện tạm để không tự đổi giá trị field khi user
+                          // chưa động vào; chọn giá trị khác để xoá.
+                          ...(f.aggregate === 'latest' || f.aggregate === 'earliest'
+                            ? [{ value: f.aggregate, label: AGGREGATE_LABEL[f.aggregate] }]
+                            : []),
+                        ]}
+                      />
                     ) : (
                       <span className="muted">Mặc định</span>
                     )}

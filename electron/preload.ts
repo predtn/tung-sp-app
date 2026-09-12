@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from 'electron';
+import { contextBridge, ipcRenderer, webUtils } from 'electron';
 import type { AppConfig, ExtractedRecord, FieldDef, SheetTab } from './types';
 import type { ImportLogEntry } from './history';
 import type { TabSyncPlan } from './google';
@@ -31,6 +31,9 @@ const api = {
     ipcRenderer.invoke('sheets:applySync', tab, fields),
 
   pickPdfs: (): Promise<string[]> => ipcRenderer.invoke('pdf:pick'),
+  // Electron 32+ không còn lộ File.path trong renderer vì lý do bảo mật ->
+  // phải lấy đường dẫn thật qua webUtils trong preload (kéo-thả file).
+  getPathForFile: (file: File): string => webUtils.getPathForFile(file),
   peekCache: (
     filePaths: string[],
     tab?: string
