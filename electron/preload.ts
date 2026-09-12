@@ -25,6 +25,8 @@ const api = {
     headerB: string
   ): Promise<string[]> =>
     ipcRenderer.invoke('sheets:existingKeys', tab, headerA, headerB),
+  existingSingleKeys: (tab: string, header: string): Promise<string[]> =>
+    ipcRenderer.invoke('sheets:existingSingleKeys', tab, header),
   applyTabSync: (tab: string, fields: FieldDef[]): Promise<boolean> =>
     ipcRenderer.invoke('sheets:applySync', tab, fields),
 
@@ -50,12 +52,19 @@ const api = {
   googleSignIn: (): Promise<{ signedIn: boolean }> => ipcRenderer.invoke('google:signin'),
   googleSignOut: (): Promise<{ signedIn: boolean }> => ipcRenderer.invoke('google:signout'),
 
-  listTabs: (): Promise<SheetTab[]> => ipcRenderer.invoke('sheets:tabs'),
+  listTabs: (includeFinal?: boolean): Promise<SheetTab[]> =>
+    ipcRenderer.invoke('sheets:tabs', includeFinal),
   createTab: (title: string): Promise<SheetTab> => ipcRenderer.invoke('sheets:createTab', title),
   appendRows: (
     tabTitle: string,
     records: ExtractedRecord[]
   ): Promise<{ appended: number }> => ipcRenderer.invoke('sheets:append', tabTitle, records),
+  upsertRows: (
+    tabTitle: string,
+    records: ExtractedRecord[],
+    keyFieldKey: string
+  ): Promise<{ updated: number; appended: number }> =>
+    ipcRenderer.invoke('sheets:upsert', tabTitle, records, keyFieldKey),
 
   getHistory: (): Promise<ImportLogEntry[]> => ipcRenderer.invoke('history:get'),
   clearHistory: (): Promise<boolean> => ipcRenderer.invoke('history:clear'),

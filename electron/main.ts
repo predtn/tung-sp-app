@@ -24,6 +24,7 @@ import {
   peekCache,
 } from './scanCache';
 import type { AppConfig, ExtractedRecord, FieldDef } from './types';
+import { finalTabName, isFinalTab, finalColumnLabel } from './tabNaming';
 
 const isDev = !!process.env.VITE_DEV_SERVER_URL;
 
@@ -152,7 +153,8 @@ function registerIpc() {
     'sheets:planSync',
     async (_e, tabTitle: string, fields: FieldDef[]) => {
       const cfg = loadConfig();
-      const headers = fields.map((f) => f.label);
+      const labelOf = isFinalTab(tabTitle) ? finalColumnLabel : (f: FieldDef) => f.label;
+      const headers = fields.map(labelOf);
       headers.push('Thời gian nhập');
       return gs.withAuth(() =>
         gs.planTabSync(
@@ -184,12 +186,30 @@ function registerIpc() {
     }
   );
 
+  // Đối chiếu trùng theo 1 cột (dùng cho tab "-final": mỗi bệnh nhân 1 dòng)
+  ipcMain.handle(
+    'sheets:existingSingleKeys',
+    async (_e, tabTitle: string, header: string) => {
+      const cfg = loadConfig();
+      return gs.withAuth(() =>
+        gs.existingSingleKeys(
+          cfg.googleClientId,
+          cfg.googleClientSecret,
+          cfg.spreadsheetId,
+          tabTitle,
+          header
+        )
+      );
+    }
+  );
+
   // Thực thi đồng bộ cột (ghi lại tab)
   ipcMain.handle(
     'sheets:applySync',
     async (_e, tabTitle: string, fields: FieldDef[]) => {
       const cfg = loadConfig();
-      const headers = fields.map((f) => f.label);
+      const labelOf = isFinalTab(tabTitle) ? finalColumnLabel : (f: FieldDef) => f.label;
+      const headers = fields.map(labelOf);
       headers.push('Thời gian nhập');
       await gs.withAuth(() =>
         gs.applyTabSync(
@@ -311,11 +331,15 @@ function registerIpc() {
     return { signedIn: false };
   });
 
-  ipcMain.handle('sheets:tabs', async () => {
+  ipcMain.handle('sheets:tabs', async (_e, includeFinal?: boolean) => {
     const cfg = loadConfig();
-    return gs.withAuth(() =>
+    const all = await gs.withAuth(() =>
       gs.listTabs(cfg.googleClientId, cfg.googleClientSecret, cfg.spreadsheetId)
     );
+    // mặc định ẩn các tab "-final" (chỉ dùng nội bộ để lưu dòng tổng hợp) khỏi
+    // dropdown chọn tab đích; includeFinal=true khi cần danh sách đầy đủ
+    // (vd FieldsEditor kiểm tra tab nào không còn tồn tại trên Sheet).
+    return includeFinal ? all : all.filter((t) => !isFinalTab(t.title));
   });
 
   ipcMain.handle('sheets:createTab', async (_e, title: string) => {
@@ -335,6 +359,31 @@ function registerIpc() {
     );
     // chỉ lưu cấu hình trường của tab sau khi tạo thành công trên Sheet
     saveFieldsForTab(title, fields);
+
+    // đồng thời tạo tab "<tên> - final" cùng cấu trúc, dùng để lưu dòng tổng hợp
+    // (lọc nâng cao). Cấu hình trường được lưu theo TÊN TAB, nên tab final cũng
+    // cần saveFieldsForTab riêng (giống hệt bộ trường của tab gốc) để
+    // "sheets:append" sau này đọc đúng field khi ghi vào tab final. Cột nào có
+    // cấu hình lọc nâng cao (max/min/avg) thì tên cột thêm hậu tố tương ứng.
+    const finalTitle = finalTabName(title);
+    const finalHeaders = fields.map(finalColumnLabel);
+    finalHeaders.push('Thời gian nhập');
+    try {
+      await gs.withAuth(() =>
+        gs.createTab(
+          cfg.googleClientId,
+          cfg.googleClientSecret,
+          cfg.spreadsheetId,
+          finalTitle,
+          finalHeaders
+        )
+      );
+      saveFieldsForTab(finalTitle, fields);
+    } catch (err: any) {
+      // không chặn tạo tab gốc chỉ vì tab final lỗi -> báo qua console, renderer vẫn coi là thành công
+      console.error('Tạo tab final thất bại:', err?.message ?? err);
+    }
+
     return tab;
   });
 
@@ -343,7 +392,8 @@ function registerIpc() {
     async (_e, tabTitle: string, records: ExtractedRecord[]) => {
       const cfg = loadConfig();
       const fields = loadFieldsForTab(tabTitle);
-      const headers = fields.map((f) => f.label);
+      const labelOf = isFinalTab(tabTitle) ? finalColumnLabel : (f: FieldDef) => f.label;
+      const headers = fields.map(labelOf);
       headers.push('Thời gian nhập');
 
       await gs.withAuth(() =>
@@ -386,6 +436,98 @@ function registerIpc() {
       });
 
       return { appended: n };
+    }
+  );
+
+  // Ghi vào tab "-final": bệnh nhân đã có -> CẬP NHẬT đè dòng cũ (bản mới
+  // nhất), chưa có -> thêm dòng mới. keyFieldKey là field key của trường
+  // role='id' (Mã BN), dùng để xác định dòng nào cần cập nhật.
+  ipcMain.handle(
+    'sheets:upsert',
+    async (_e, tabTitle: string, records: ExtractedRecord[], keyFieldKey: string) => {
+      const cfg = loadConfig();
+      const fields = loadFieldsForTab(tabTitle);
+      // sheets:upsert chỉ dùng cho tab "-final" -> luôn áp hậu tố lọc nâng cao
+      const headers = fields.map(finalColumnLabel);
+      headers.push('Thời gian nhập');
+      const keyHeader = fields.find((f) => f.key === keyFieldKey)?.label;
+      const keyColIdx = fields.findIndex((f) => f.key === keyFieldKey);
+      if (!keyHeader || keyColIdx === -1) {
+        throw new Error('Không tìm thấy trường định danh (Mã BN) trong cấu hình tab.');
+      }
+
+      await gs.withAuth(() =>
+        gs.ensureHeaders(
+          cfg.googleClientId,
+          cfg.googleClientSecret,
+          cfg.spreadsheetId,
+          tabTitle,
+          headers
+        )
+      );
+
+      const now = new Date().toLocaleString('vi-VN');
+      const rows = records.map((r) => {
+        const row = fields.map((f) => r.values[f.key] ?? '');
+        row.push(now);
+        return row;
+      });
+
+      // Xác định trước dòng nào đã có sẵn (cập nhật) / chưa có (thêm mới),
+      // để không phải đoán/đối chiếu lại sau khi ghi.
+      const existing = new Set(
+        await gs.withAuth(() =>
+          gs.existingSingleKeys(
+            cfg.googleClientId,
+            cfg.googleClientSecret,
+            cfg.spreadsheetId,
+            tabTitle,
+            keyHeader
+          )
+        )
+      );
+      const norm = (s: string) => (s ?? '').trim().toLowerCase();
+      const toUpdate = rows.filter((row) => existing.has(norm(row[keyColIdx])));
+      const toAppend = rows.filter((row) => !existing.has(norm(row[keyColIdx])));
+
+      let updated = 0;
+      if (toUpdate.length > 0) {
+        updated = await gs.withAuth(() =>
+          gs.updateRowsByKey(
+            cfg.googleClientId,
+            cfg.googleClientSecret,
+            cfg.spreadsheetId,
+            tabTitle,
+            keyHeader,
+            toUpdate,
+            keyColIdx
+          )
+        );
+      }
+
+      let appended = 0;
+      if (toAppend.length > 0) {
+        appended = await gs.withAuth(() =>
+          gs.appendRows(
+            cfg.googleClientId,
+            cfg.googleClientSecret,
+            cfg.spreadsheetId,
+            tabTitle,
+            toAppend
+          )
+        );
+      }
+
+      addHistory({
+        at: new Date().toISOString(),
+        tab: tabTitle,
+        rows: updated + appended,
+        files: records.map((r) => r.sourceFile),
+        estimatedUsd: records.reduce((s, r) => s + (r.usage?.estimatedUsd ?? 0), 0),
+        totalTokens: records.reduce((s, r) => s + (r.usage?.totalTokens ?? 0), 0),
+      });
+
+      return { updated, appended };
     }
   );
 
@@ -443,6 +585,12 @@ function validateFields(fields: FieldDef[]): FieldDef[] {
 
     const item: FieldDef = { key: uniqueKey, label, description, role };
     if (example) item.example = example;
+    if (role === 'varying') {
+      const validAgg = ['none', 'max', 'min', 'avg', 'latest', 'earliest'];
+      item.aggregate = validAgg.includes(raw.aggregate as string)
+        ? (raw.aggregate as FieldDef['aggregate'])
+        : 'none';
+    }
     cleaned.push(item);
   }
   if (idCount > 1) {

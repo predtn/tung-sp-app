@@ -1,6 +1,13 @@
 import { useEffect, useState } from 'react';
-import type { FieldDef, FieldRole, SheetTab } from '../electron/types';
+import type {
+  AggregateMode,
+  FieldDef,
+  FieldRole,
+  SheetTab,
+} from '../electron/types';
 import type { TabSyncPlan } from '../electron/google';
+import { finalTabName } from '../electron/tabNaming';
+import { confirmDialog } from './ConfirmDialog';
 
 const ROLE_LABEL: Record<FieldRole, string> = {
   id: 'Định danh (mã BN)',
@@ -9,6 +16,19 @@ const ROLE_LABEL: Record<FieldRole, string> = {
   varying: 'Biến thiên',
 };
 const ROLE_ORDER: FieldRole[] = ['id', 'visitkey', 'fixed', 'varying'];
+
+const AGGREGATE_LABEL: Record<AggregateMode, string> = {
+  none: 'Mặc định',
+  max: 'Lớn nhất',
+  min: 'Nhỏ nhất',
+  avg: 'Trung bình',
+  // 'latest'/'earliest' bị bỏ khỏi lựa chọn (thứ tự đợt khám không tất định
+  // khi thiếu Khoá đợt khám) — nhãn vẫn giữ để hiển thị đúng nếu dữ liệu cũ
+  // còn sót giá trị này, nhưng không đưa vào AGGREGATE_ORDER (danh sách chọn).
+  latest: 'Lần khám mới nhất (đã ngừng hỗ trợ)',
+  earliest: 'Lần khám muộn nhất (đã ngừng hỗ trợ)',
+};
+const AGGREGATE_ORDER: AggregateMode[] = ['none', 'max', 'min', 'avg'];
 
 interface Props {
   // bộ trường chung (khi chưa chọn tab)
@@ -48,9 +68,14 @@ export default function FieldsEditor({
       return;
     }
     try {
+      // dropdown chọn tab: không hiện tab "-final" (nội bộ)
       const live = await window.api.listTabs();
       setTabs(live);
-      const liveNames = new Set(live.map((t) => t.title));
+      // kiểm tra "tab mồ côi": phải đối chiếu với danh sách ĐẦY ĐỦ (kể cả
+      // "-final"), nếu không tab final sẽ luôn bị coi là mồ côi vì nó bị lọc
+      // khỏi danh sách dropdown ở trên.
+      const allLive = await window.api.listTabs(true);
+      const liveNames = new Set(allLive.map((t) => t.title));
       setOrphanTabs(configured.filter((n) => !liveNames.has(n)));
     } catch {
       setTabs([]);
@@ -93,9 +118,10 @@ export default function FieldsEditor({
 
   async function onDeleteOrphan(name: string) {
     if (
-      !window.confirm(
-        `Xoá cấu hình trường của tab "${name}"? (tab này không còn trên Google Sheet)`
-      )
+      !(await confirmDialog(
+        `Tab "${name}" này không còn trên Google Sheet.`,
+        { title: `Xoá cấu hình trường của tab "${name}"?`, danger: true, confirmLabel: 'Xoá' }
+      ))
     )
       return;
     await window.api.deleteFieldsForTab(name);
@@ -133,13 +159,26 @@ export default function FieldsEditor({
   function addRow() {
     setRows((rs) => [
       ...rs,
-      { key: '', label: '', description: '', example: '', role: 'varying' },
+      {
+        key: '',
+        label: '',
+        description: '',
+        example: '',
+        role: 'varying',
+        aggregate: 'none',
+      },
     ]);
   }
   function setRole(idx: number, role: FieldRole) {
     setRows((rs) =>
       rs.map((r, i) => {
-        if (i === idx) return { ...r, role };
+        if (i === idx)
+          return {
+            ...r,
+            role,
+            // aggregate chỉ có nghĩa với 'varying' -> đổi vai trò khác thì bỏ
+            aggregate: role === 'varying' ? r.aggregate : undefined,
+          };
         // 'id' và 'visitkey' chỉ được 1 trường -> hạ trường cũ cùng vai trò xuống 'varying'
         if ((role === 'id' || role === 'visitkey') && r.role === role)
           return { ...r, role: 'varying' };
@@ -163,13 +202,17 @@ export default function FieldsEditor({
   function cleanRows(): FieldDef[] {
     return rows
       .filter((r) => r.label.trim() !== '')
-      .map((r) => ({
-        key: r.key,
-        label: r.label.trim(),
-        description: r.description.trim(),
-        example: (r.example ?? '').trim() || undefined,
-        role: r.role ?? 'varying',
-      }));
+      .map((r) => {
+        const role = r.role ?? 'varying';
+        return {
+          key: r.key,
+          label: r.label.trim(),
+          description: r.description.trim(),
+          example: (r.example ?? '').trim() || undefined,
+          role,
+          aggregate: role === 'varying' ? r.aggregate ?? 'none' : undefined,
+        };
+      });
   }
 
   async function handleSaveShared() {
@@ -189,33 +232,21 @@ export default function FieldsEditor({
 
   const isOrphan = orphanTabs.includes(selectedTab);
 
-  async function handleSaveTab() {
-    if (isOrphan) {
-      setMsg('Tab này không còn trên Google Sheet — không đồng bộ được.');
-      return;
-    }
-    const cleaned = cleanRows();
-    setSaving(true);
-    setMsg('');
-    try {
-      // 1) xem trước thay đổi trên Sheet
-      const plan: TabSyncPlan = await window.api.planTabSync(selectedTab, cleaned);
-
-      // 2) nếu có xoá cột chứa dữ liệu -> hỏi rõ
+  /** Gộp cảnh báo xoá-cột-có-dữ-liệu của cả tab gốc và tab final thành 1 lời hỏi duy nhất. */
+  async function confirmSyncPlans(
+    plans: { tabTitle: string; plan: TabSyncPlan }[]
+  ): Promise<boolean> {
+    const withDataParts: string[] = [];
+    const changeParts: string[] = [];
+    for (const { tabTitle, plan } of plans) {
       const withData = plan.removedColumns.filter((c) => c.nonEmptyCells > 0);
       if (withData.length > 0) {
-        const detail = withData
-          .map((c) => `  • "${c.name}" — ${c.nonEmptyCells} ô có dữ liệu`)
-          .join('\n');
-        const ok = window.confirm(
-          `Đồng bộ tab "${selectedTab}" sẽ XOÁ các cột sau cùng toàn bộ dữ liệu trong đó:\n\n${detail}\n\n` +
-            `Tab đang có ${plan.dataRowCount} dòng dữ liệu. Thao tác không hoàn tác được. Tiếp tục?`
+        withDataParts.push(
+          `Tab "${tabTitle}" (${plan.dataRowCount} dòng dữ liệu):\n` +
+            withData
+              .map((c) => `  • "${c.name}" — ${c.nonEmptyCells} ô có dữ liệu`)
+              .join('\n')
         );
-        if (!ok) {
-          setSaving(false);
-          setMsg('Đã huỷ, chưa thay đổi gì.');
-          return;
-        }
       } else if (
         plan.addedColumns.length > 0 ||
         plan.removedColumns.length > 0 ||
@@ -231,26 +262,85 @@ export default function FieldsEditor({
               .join(', ')}`
           );
         if (plan.reordered) bits.push('sắp xếp lại thứ tự cột');
-        const ok = window.confirm(
-          `Đồng bộ tab "${selectedTab}":\n\n• ${bits.join(
-            '\n• '
-          )}\n\nHàng tiêu đề sẽ được ghi lại và in đậm. Tiếp tục?`
-        );
-        if (!ok) {
+        changeParts.push(`Tab "${tabTitle}": ${bits.join(', ')}`);
+      }
+    }
+
+    if (withDataParts.length > 0) {
+      return confirmDialog(
+        `${withDataParts.join('\n\n')}\n\nThao tác không hoàn tác được. Tiếp tục?`,
+        {
+          title: 'Đồng bộ sẽ XOÁ các cột sau cùng toàn bộ dữ liệu trong đó',
+          danger: true,
+          confirmLabel: 'Xoá & tiếp tục',
+        }
+      );
+    }
+    if (changeParts.length > 0) {
+      return confirmDialog(
+        `${changeParts.join('\n')}\n\nHàng tiêu đề sẽ được ghi lại và in đậm. Tiếp tục?`,
+        { title: 'Đồng bộ tab', confirmLabel: 'Tiếp tục' }
+      );
+    }
+    return true;
+  }
+
+  async function handleSaveTab() {
+    if (isOrphan) {
+      setMsg('Tab này không còn trên Google Sheet — không đồng bộ được.');
+      return;
+    }
+    const cleaned = cleanRows();
+    const finalTitle = finalTabName(selectedTab);
+    setSaving(true);
+    setMsg('');
+    try {
+      // 1) xem trước thay đổi trên cả 2 tab (gốc + final, luôn cùng cấu trúc)
+      const [planMain, planFinal] = await Promise.all([
+        window.api.planTabSync(selectedTab, cleaned),
+        window.api.planTabSync(finalTitle, cleaned).catch(() => null),
+      ]);
+
+      const plans: { tabTitle: string; plan: TabSyncPlan }[] = [
+        { tabTitle: selectedTab, plan: planMain },
+      ];
+      if (planFinal) plans.push({ tabTitle: finalTitle, plan: planFinal });
+
+      const ok = await confirmSyncPlans(plans);
+      if (!ok) {
+        setSaving(false);
+        setMsg('Đã huỷ, chưa thay đổi gì.');
+        return;
+      }
+
+      // 2) Ghi Sheet TRƯỚC (header + sắp cột + in đậm), chỉ lưu cấu hình local
+      //    SAU KHI ghi Sheet thành công. Nếu applyTabSync lỗi giữa chừng, field
+      //    config (local) giữ nguyên bản cũ — tránh trạng thái "field đã đổi
+      //    nhưng cột thật trên Sheet chưa đổi" gây ghi lệch cột về sau.
+      await window.api.applyTabSync(selectedTab, cleaned);
+      const saved = await window.api.setFieldsForTab(selectedTab, cleaned);
+      setRows(saved);
+
+      if (planFinal) {
+        try {
+          await window.api.applyTabSync(finalTitle, saved);
+          await window.api.setFieldsForTab(finalTitle, saved);
+        } catch (e: any) {
+          setMsg(
+            `Đã lưu & đồng bộ tab "${selectedTab}" nhưng đồng bộ tab "${finalTitle}" thất bại — ` +
+              `cấu hình trường của "${finalTitle}" GIỮ NGUYÊN như cũ để tránh lệch cột: ` +
+              (e?.message ?? e)
+          );
           setSaving(false);
-          setMsg('Đã huỷ, chưa thay đổi gì.');
           return;
         }
       }
 
-      // 3) lưu cấu hình trường của tab
-      const saved = await window.api.setFieldsForTab(selectedTab, cleaned);
-      setRows(saved);
-
-      // 4) ghi lại Sheet (header + sắp cột + in đậm)
-      await window.api.applyTabSync(selectedTab, saved);
-
-      setMsg(`Đã lưu & đồng bộ tab "${selectedTab}" trên Google Sheet.`);
+      setMsg(
+        planFinal
+          ? `Đã lưu & đồng bộ tab "${selectedTab}" và "${finalTitle}".`
+          : `Đã lưu & đồng bộ tab "${selectedTab}" (không tìm thấy tab final để đồng bộ kèm).`
+      );
     } catch (e: any) {
       setMsg('Lỗi: ' + (e?.message ?? e));
     } finally {
@@ -389,10 +479,11 @@ export default function FieldsEditor({
           <table>
             <thead>
               <tr>
-                <th style={{ width: 150 }}>Tên hiển thị (cột Sheet)</th>
+                <th style={{ width: 140 }}>Tên hiển thị (cột Sheet)</th>
                 <th>Mô tả cho AI</th>
-                <th style={{ width: 130 }}>Ví dụ (tuỳ chọn)</th>
-                <th style={{ width: 130 }}>Vai trò</th>
+                <th style={{ width: 110 }}>Ví dụ (tuỳ chọn)</th>
+                <th style={{ width: 120 }}>Vai trò</th>
+                <th style={{ width: 140 }}>Lọc giá trị (nâng cao)</th>
                 <th style={{ width: 110 }}></th>
               </tr>
             </thead>
@@ -431,6 +522,34 @@ export default function FieldsEditor({
                         </option>
                       ))}
                     </select>
+                  </td>
+                  <td>
+                    {(f.role ?? 'varying') === 'varying' ? (
+                      <select
+                        value={f.aggregate ?? 'none'}
+                        onChange={(e) =>
+                          update(i, {
+                            aggregate: e.target.value as AggregateMode,
+                          })
+                        }
+                      >
+                        {AGGREGATE_ORDER.map((a) => (
+                          <option key={a} value={a}>
+                            {AGGREGATE_LABEL[a]}
+                          </option>
+                        ))}
+                        {/* dữ liệu cũ có thể còn 'latest'/'earliest' đã ngừng hỗ trợ
+                            -> hiện tạm để không tự đổi giá trị field khi user chưa
+                            động vào; chọn lại 'Mặc định' hoặc giá trị khác để xoá. */}
+                        {(f.aggregate === 'latest' || f.aggregate === 'earliest') && (
+                          <option value={f.aggregate}>
+                            {AGGREGATE_LABEL[f.aggregate]}
+                          </option>
+                        )}
+                      </select>
+                    ) : (
+                      <span className="muted">Mặc định</span>
+                    )}
                   </td>
                   <td>
                     <div className="row" style={{ gap: 3, flexWrap: 'nowrap' }}>

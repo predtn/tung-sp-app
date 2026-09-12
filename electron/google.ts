@@ -191,6 +191,38 @@ export async function existingKeyPairs(
     .filter((k) => k !== KEY_SEP);
 }
 
+/**
+ * Đọc giá trị đã có của 1 cột (vd Mã BN) trong tab — dùng chống trùng cho tab
+ * "final" nơi mỗi bệnh nhân chỉ có 1 dòng (khác tab gốc cần khoá kép id+visitkey).
+ */
+export async function existingSingleKeys(
+  clientId: string,
+  clientSecret: string,
+  spreadsheetId: string,
+  tabTitle: string,
+  header: string
+): Promise<string[]> {
+  const sheets = google.sheets({ version: 'v4', auth: getClient(clientId, clientSecret) });
+  const resp = await sheets.spreadsheets.values.get({
+    spreadsheetId,
+    range: q(tabTitle),
+    majorDimension: 'ROWS',
+  });
+  const rows: string[][] = (resp.data.values as string[][]) ?? [];
+  if (rows.length < 2) return [];
+  const idx = rows[0].indexOf(header);
+  if (idx === -1) {
+    throw new Error(
+      `Tab "${tabTitle}" chưa có cột "${header}" ở hàng tiêu đề — hãy vào ` +
+        `Cài đặt → chọn tab này → "Lưu & đồng bộ Google Sheet" để tạo đúng cột.`
+    );
+  }
+  return rows
+    .slice(1)
+    .map((r) => normKey(r[idx]))
+    .filter((k) => k !== '');
+}
+
 export async function createTab(
   clientId: string,
   clientSecret: string,
@@ -271,6 +303,82 @@ export async function appendRows(
   }
 
   return resp.data.updates?.updatedRows ?? 0;
+}
+
+/**
+ * Ghi đè (update) các dòng đã tồn tại theo giá trị khoá ở 1 cột (vd Mã BN),
+ * dùng cho tab "-final": mỗi bệnh nhân đúng 1 dòng, luôn là bản mới nhất.
+ * keyHeader: tên cột dùng để tìm dòng cần ghi đè. keyColIndexInRow: index của
+ * cột khoá trong mỗi phần tử của `rows` (để đọc giá trị khoá tương ứng).
+ * Trả về số dòng đã update (không tính append — hàm này giả định mọi dòng
+ * truyền vào đều đã có sẵn, gọi appendRows() riêng cho dòng chưa có).
+ */
+export async function updateRowsByKey(
+  clientId: string,
+  clientSecret: string,
+  spreadsheetId: string,
+  tabTitle: string,
+  keyHeader: string,
+  rows: string[][],
+  keyColIndexInRow: number
+): Promise<number> {
+  const sheets = google.sheets({ version: 'v4', auth: getClient(clientId, clientSecret) });
+  const resp = await sheets.spreadsheets.values.get({
+    spreadsheetId,
+    range: q(tabTitle),
+    majorDimension: 'ROWS',
+  });
+  const existingRows: string[][] = (resp.data.values as string[][]) ?? [];
+  if (existingRows.length < 1) return 0;
+  const header = existingRows[0];
+  const keyIdx = header.indexOf(keyHeader);
+  if (keyIdx === -1) {
+    throw new Error(
+      `Tab "${tabTitle}" chưa có cột "${keyHeader}" ở hàng tiêu đề.`
+    );
+  }
+
+  // map giá trị khoá (chuẩn hoá) -> số dòng thật trên Sheet (1-based)
+  const rowByKey = new Map<string, number>();
+  for (let i = 1; i < existingRows.length; i++) {
+    const k = normKey(existingRows[i][keyIdx]);
+    if (k) rowByKey.set(k, i + 1); // +1 vì Sheet 1-based, existingRows 0-based
+  }
+
+  let updated = 0;
+  const requests: { range: string; values: string[][] }[] = [];
+  for (const row of rows) {
+    const k = normKey(row[keyColIndexInRow]);
+    const sheetRow = rowByKey.get(k);
+    if (!sheetRow) continue; // không có sẵn -> để appendRows() xử lý riêng
+    const lastCol = colLetter(row.length);
+    requests.push({
+      range: `${q(tabTitle)}!A${sheetRow}:${lastCol}${sheetRow}`,
+      values: [row],
+    });
+    updated++;
+  }
+  if (requests.length === 0) return 0;
+
+  await sheets.spreadsheets.values.batchUpdate({
+    spreadsheetId,
+    requestBody: {
+      valueInputOption: 'RAW',
+      data: requests,
+    },
+  });
+  return updated;
+}
+
+/** Chuyển số cột (1-based) sang ký hiệu cột Sheet (1 -> A, 27 -> AA...). */
+function colLetter(n: number): string {
+  let s = '';
+  while (n > 0) {
+    const rem = (n - 1) % 26;
+    s = String.fromCharCode(65 + rem) + s;
+    n = Math.floor((n - 1) / 26);
+  }
+  return s;
 }
 
 export async function ensureHeaders(

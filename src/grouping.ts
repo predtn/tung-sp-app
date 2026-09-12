@@ -12,6 +12,15 @@ export interface PatientGroup {
 export function idField(fields: FieldDef[]): FieldDef | undefined {
   return fields.find((f) => f.role === 'id');
 }
+
+/** khoá override cho 1 ô "Lọc nâng cao" (bác sĩ sửa tay): theo mã BN + trường. */
+export function aggOverrideKey(
+  g: Pick<PatientGroup, 'idValue' | 'indices'>,
+  fieldKey: string
+): string {
+  const groupId = g.idValue || `row${g.indices[0]}`;
+  return `${groupId}:${fieldKey}`;
+}
 export function visitKeyField(fields: FieldDef[]): FieldDef | undefined {
   return fields.find((f) => f.role === 'visitkey');
 }
@@ -147,6 +156,72 @@ function parseNum(v: string | undefined): number | null {
   // lấy số đầu tiên trong chuỗi (vd "45 U/L" -> 45)
   const m = v.replace(',', '.').match(/-?\d+(\.\d+)?/);
   return m ? Number(m[0]) : null;
+}
+
+/**
+ * Tách số ở ĐẦU chuỗi + phần đơn vị còn lại (nếu có). Chấp nhận "53.2 kg",
+ * "820.5 ng/mL", "45"... nhưng TỪ CHỐI chuỗi bắt đầu bằng ký tự so sánh
+ * ("< 20", "> 100", "~ 5") vì giá trị thực sự mơ hồ, không thể lấy đại diện
+ * để tính max/min/avg một cách đáng tin cậy — để trống cho bác sĩ tự điền.
+ * Dùng cho tính năng lọc nâng cao (max/min/avg).
+ */
+function parseLeadingNum(
+  v: string | undefined
+): { num: number; unit: string } | null {
+  if (!v) return null;
+  const s = v.trim().replace(',', '.');
+  const m = s.match(/^(-?\d+(?:\.\d+)?)\s*(.*)$/);
+  if (!m) return null;
+  const unit = m[2].trim();
+  // đuôi bắt đầu bằng "x"/"×" + số -> dạng ký hiệu khoa học (vd "4.5 x 10^4
+  // IU/mL"). Số thật là num * 10^mũ, không phải num -> lấy riêng num là SAI
+  // lệch nghiêm trọng. Coi là không parse được, để bác sĩ tự tính/nhập tay.
+  if (/^[x×]\s*10/i.test(unit)) return null;
+  return { num: Number(m[1]), unit };
+}
+
+export interface AggregateResult {
+  value: string;
+  /** true nếu không tính được (giá trị không phải số thuần / thiếu dữ liệu) */
+  unavailable: boolean;
+}
+
+/**
+ * Tính giá trị tổng hợp của 1 trường 'varying' qua các đợt khám trong nhóm,
+ * theo `mode` (aggregate đã cấu hình cho trường đó).
+ */
+export function computeAggregate(
+  group: PatientGroup,
+  field: FieldDef
+): AggregateResult {
+  const mode = field.aggregate ?? 'none';
+  // 'latest'/'earliest' đã bị bỏ khỏi lựa chọn UI (thứ tự đợt khám không tất
+  // định khi thiếu Khoá đợt khám) -> coi như 'none' nếu còn sót trong dữ liệu cũ.
+  if (mode === 'none' || mode === 'latest' || mode === 'earliest') {
+    return { value: '', unavailable: false };
+  }
+
+  // max / min / avg -> tách số ở đầu chuỗi (đơn vị phía sau bị bỏ khi tính,
+  // giữ lại để hiển thị kết quả cho đúng ngữ cảnh)
+  const parsed = group.records.map((r) => parseLeadingNum(r.values[field.key]));
+  if (parsed.some((p) => p === null) || parsed.length === 0) {
+    return { value: '', unavailable: true };
+  }
+  const valid = parsed as { num: number; unit: string }[];
+  // đơn vị hiển thị: lấy đơn vị xuất hiện nhiều nhất trong các đợt (đa số thắng)
+  const unitCounts = new Map<string, number>();
+  for (const p of valid) unitCounts.set(p.unit, (unitCounts.get(p.unit) ?? 0) + 1);
+  const commonUnit = [...unitCounts.entries()].sort((a, b) => b[1] - a[1])[0][0];
+
+  let result: number;
+  if (mode === 'max') result = Math.max(...valid.map((p) => p.num));
+  else if (mode === 'min') result = Math.min(...valid.map((p) => p.num));
+  else result = valid.reduce((a, p) => a + p.num, 0) / valid.length; // avg
+
+  // làm tròn 2 chữ số thập phân, bỏ .00 thừa
+  const rounded = Math.round(result * 100) / 100;
+  const value = commonUnit ? `${rounded} ${commonUnit}` : String(rounded);
+  return { value, unavailable: false };
 }
 
 /** Khoá đợt khám trùng nhau trong cùng nhóm -> có thể quét trùng file. */

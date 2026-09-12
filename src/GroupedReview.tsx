@@ -9,7 +9,17 @@ import {
   fixedConflicts,
   trendMarks,
   duplicateVisits,
+  computeAggregate,
+  aggOverrideKey,
 } from './grouping';
+
+const AGGREGATE_LABEL: Record<string, string> = {
+  max: 'Lớn nhất',
+  min: 'Nhỏ nhất',
+  avg: 'Trung bình',
+  latest: 'Mới nhất',
+  earliest: 'Muộn nhất',
+};
 
 interface Props {
   fields: FieldDef[];
@@ -17,7 +27,10 @@ interface Props {
   issues: CellIssue[];
   onChange: (r: ExtractedRecord[]) => void;
   onOpenPdf: (path: string, name: string) => void;
+  aggOverrides: Record<string, string>;
+  onAggOverride: (key: string, value: string) => void;
 }
+
 
 const TREND_ICON = { up: '▲', down: '▼', same: '=' } as const;
 const TREND_CLASS = { up: 'trend-up', down: 'trend-down', same: 'trend-same' } as const;
@@ -28,11 +41,15 @@ export default function GroupedReview({
   issues,
   onChange,
   onOpenPdf,
+  aggOverrides,
+  onAggOverride,
 }: Props) {
   const groups = groupByPatient(records, fields);
   const idf = idField(fields);
   const fixedF = fixedFields(fields);
   const varyF = varyingFields(fields);
+  // có ít nhất 1 trường biến thiên được cấu hình "Lọc giá trị nâng cao" -> hiện thêm cột
+  const hasAggregate = varyF.some((f) => (f.aggregate ?? 'none') !== 'none');
 
   const issueMap = new Map<string, string>();
   for (const it of issues) issueMap.set(`${it.recordIdx}:${it.fieldKey}`, it.message);
@@ -159,6 +176,9 @@ export default function GroupedReview({
                         )}
                       </th>
                     ))}
+                    {hasAggregate && (
+                      <th style={{ width: 130 }}>Lọc nâng cao</th>
+                    )}
                   </tr>
                 </thead>
                 <tbody>
@@ -206,6 +226,45 @@ export default function GroupedReview({
                           </td>
                         );
                       })}
+                      {hasAggregate && (
+                        <td className="agg-cell">
+                          {(() => {
+                            const mode = f.aggregate ?? 'none';
+                            const key = aggOverrideKey(g, f.key);
+                            const overridden = aggOverrides[key];
+                            const auto =
+                              mode === 'none' ? null : computeAggregate(g, f);
+                            const shown =
+                              overridden ?? (mode === 'none' ? '' : auto?.value ?? '');
+                            const isUnavailable =
+                              overridden === undefined &&
+                              mode !== 'none' &&
+                              (auto?.unavailable ?? false);
+                            return (
+                              <>
+                                <AutoTextarea
+                                  value={shown}
+                                  placeholder={
+                                    isUnavailable
+                                      ? '(chưa tính được)'
+                                      : mode === 'none'
+                                      ? 'Mặc định'
+                                      : 'Nhập tay…'
+                                  }
+                                  className={isUnavailable ? 'agg-input muted' : 'agg-input'}
+                                  onChange={(v) => onAggOverride(key, v)}
+                                />
+                                {mode !== 'none' && (
+                                  <div className="agg-mode">
+                                    {AGGREGATE_LABEL[mode]}
+                                    {overridden !== undefined && ' · đã sửa tay'}
+                                  </div>
+                                )}
+                              </>
+                            );
+                          })()}
+                        </td>
+                      )}
                     </tr>
                   ))}
                   <tr>
@@ -243,6 +302,25 @@ export default function GroupedReview({
                         </td>
                       );
                     })}
+                    {hasAggregate && <td></td>}
+                  </tr>
+                  <tr>
+                    <td className="vt-label">Chi phí</td>
+                    {g.records.map((r, vi) => (
+                      <td key={vi} className="hint">
+                        {r.fromCache ? (
+                          <span className="text-ok">đã quét trước · miễn phí</span>
+                        ) : r.usage ? (
+                          <>
+                            ${r.usage.estimatedUsd.toFixed(4)} ·{' '}
+                            {r.usage.totalTokens.toLocaleString('vi-VN')} token
+                          </>
+                        ) : (
+                          '—'
+                        )}
+                      </td>
+                    ))}
+                    {hasAggregate && <td></td>}
                   </tr>
                 </tbody>
               </table>

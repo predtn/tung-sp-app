@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { ImportLogEntry } from '../electron/history';
+import { confirmDialog } from './ConfirmDialog';
 
 export default function History() {
   const [entries, setEntries] = useState<ImportLogEntry[]>([]);
@@ -22,7 +23,13 @@ export default function History() {
   }, []);
 
   async function onClear() {
-    if (!window.confirm('Xoá toàn bộ nhật ký import? (không ảnh hưởng dữ liệu trên Sheet)'))
+    if (
+      !(await confirmDialog('Không ảnh hưởng dữ liệu trên Sheet.', {
+        title: 'Xoá toàn bộ nhật ký import?',
+        danger: true,
+        confirmLabel: 'Xoá',
+      }))
+    )
       return;
     await window.api.clearHistory();
     load();
@@ -30,10 +37,14 @@ export default function History() {
 
   async function onClearCache() {
     if (
-      !window.confirm(
-        `Xoá bộ nhớ đệm ${cacheCount} file đã quét?\n` +
-          'Lần sau gặp lại các file này sẽ phải quét lại (mất phí AI).'
-      )
+      !(await confirmDialog(
+        'Lần sau gặp lại các file này sẽ phải quét lại (mất phí AI).',
+        {
+          title: `Xoá bộ nhớ đệm ${cacheCount} file đã quét?`,
+          danger: true,
+          confirmLabel: 'Xoá',
+        }
+      ))
     )
       return;
     await window.api.clearCache();

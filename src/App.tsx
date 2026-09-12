@@ -5,7 +5,11 @@ import ReviewTable from './ReviewTable';
 import History from './History';
 import PdfPanel from './PdfPanel';
 import { validateRecords, countUncertain } from './validation';
-import { groupByPatient } from './grouping';
+import { groupByPatient, idField } from './grouping';
+import { buildFinalRows } from './finalRows';
+import FinalPreview from './FinalPreview';
+import { finalTabName } from '../electron/tabNaming';
+import ConfirmDialogHost, { confirmDialog } from './ConfirmDialog';
 
 type View = 'main' | 'settings' | 'history';
 
@@ -18,6 +22,14 @@ export default function App() {
   const [records, setRecords] = useState<ExtractedRecord[]>([]);
   const [processing, setProcessing] = useState(false);
   const [importing, setImporting] = useState(false);
+  // true sau khi đã Import lô hiện tại vào tab gốc — giữ nguyên records để
+  // bác sĩ còn bấm "Lưu vào bản tổng hợp…" tiếp mà không cần quét lại PDF.
+  // Nút Import bị khoá khi cờ này bật, tránh ghi trùng vào tab gốc.
+  const [importedToMain, setImportedToMain] = useState(false);
+  // true sau khi đã "Lưu vào bản tổng hợp…" (ghi tab -final) cho lô hiện tại —
+  // đối xứng với importedToMain, giữ nguyên records để bác sĩ còn bấm Import
+  // vào tab gốc tiếp mà không cần quét lại PDF.
+  const [importedToFinal, setImportedToFinal] = useState(false);
   const [progress, setProgress] = useState({ done: 0, total: 0 });
   const [drag, setDrag] = useState(false);
 
@@ -26,6 +38,16 @@ export default function App() {
   const [toast, setToast] = useState('');
   // file PDF đang xem trong panel bên phải (null = ẩn panel)
   const [pdfView, setPdfView] = useState<{ path: string; name: string } | null>(null);
+  // xem trước dòng tổng hợp trước khi ghi vào tab "-final" (null = ẩn)
+  const [finalPreview, setFinalPreview] = useState<ExtractedRecord[] | null>(null);
+  const [importingFinal, setImportingFinal] = useState(false);
+  // hỏi khi có bệnh nhân đã tồn tại trong tab final: Cập nhật / Bỏ qua / Huỷ
+  const [finalDupChoice, setFinalDupChoice] = useState<{
+    rows: ExtractedRecord[];
+    dupNames: string[];
+  } | null>(null);
+  // bác sĩ sửa tay giá trị "Lọc nâng cao" trong bảng review -> khoá "idValue:fieldKey"
+  const [aggOverrides, setAggOverrides] = useState<Record<string, string>>({});
 
   useEffect(() => {
     window.api.getConfig().then(setConfig);
@@ -120,6 +142,27 @@ export default function App() {
   // Bước đầu: kiểm tra file nào đã có cache. Có -> hỏi bác sĩ. Không -> quét luôn.
   async function startFiles(paths: string[]) {
     if (!paths.length) return;
+    // Lô hiện tại đã import xong (đang chờ bác sĩ ghi bản tổng hợp) mà quét
+    // thêm file mới sẽ xoá mất dữ liệu đang hiển thị của lô đã import khỏi
+    // màn hình (dữ liệu trên Sheet vẫn còn, chỉ mất khỏi UI) -> xác nhận trước.
+    if (importedToMain || importedToFinal) {
+      const done: string[] = [];
+      if (importedToMain) done.push('import vào tab gốc');
+      if (importedToFinal) done.push('lưu bản tổng hợp');
+      const pending = !importedToMain
+        ? ' Muốn Import vào tab gốc cho lô đã lưu tổng hợp, hãy làm việc đó trước khi quét file mới.'
+        : !importedToFinal
+        ? ' Muốn "Lưu vào bản tổng hợp" cho lô đã import, hãy làm việc đó trước khi quét file mới.'
+        : '';
+      const ok = await confirmDialog(
+        `Lô hồ sơ đã ${done.join(' và ')} sẽ biến mất khỏi màn hình này (dữ liệu ` +
+          `trên Sheet không bị ảnh hưởng).${pending}`,
+        { title: 'Quét file mới cho lô khác?', confirmLabel: 'Quét file mới' }
+      );
+      if (!ok) return;
+      setImportedToMain(false);
+      setImportedToFinal(false);
+    }
     try {
       const peek = await window.api.peekCache(paths, selectedTab || undefined);
       const cachedNames = peek.filter((p) => p.cached).map((p) => p.name);
@@ -208,9 +251,14 @@ export default function App() {
     setImporting(true);
     try {
       const { appended } = await window.api.appendRows(selectedTab, good);
-      showToast(`Đã import ${appended} dòng vào tab "${selectedTab}".`);
-      setRecords([]);
-      setPdfView(null);
+      showToast(
+        `Đã import ${appended} dòng vào tab "${selectedTab}". Có thể tiếp tục ` +
+          `"Lưu vào bản tổng hợp…", hoặc "Làm lại từ đầu" cho lô hồ sơ mới.`
+      );
+      // KHÔNG xoá records — giữ để bác sĩ còn bấm "Lưu vào bản tổng hợp…" mà
+      // không phải quét lại PDF. Khoá nút Import (importedToMain) để tránh
+      // import trùng lần 2 vào tab gốc.
+      setImportedToMain(true);
     } catch (e: any) {
       showToast('Import thất bại: ' + handleGoogleError(e));
     } finally {
@@ -218,14 +266,20 @@ export default function App() {
     }
   }
 
-  function onReset() {
+  async function onReset() {
     if (
       records.length > 0 &&
-      !window.confirm('Xoá kết quả đang có và làm lại từ đầu (chọn tab, nạp PDF)?')
+      !(await confirmDialog(
+        'Xoá kết quả đang có và làm lại từ đầu (chọn tab, nạp PDF)?',
+        { danger: true, confirmLabel: 'Xoá & làm lại' }
+      ))
     )
       return;
     setRecords([]);
     setPdfView(null);
+    setAggOverrides({});
+    setImportedToMain(false);
+    setImportedToFinal(false);
   }
 
   async function onImport() {
@@ -272,30 +326,36 @@ export default function App() {
                 }`
             )
             .join('\n');
-          const ok = window.confirm(
-            `${dupInSheet.length} đợt khám dưới đây ĐÃ CÓ trong tab "${selectedTab}" (trùng Mã BN + Ngày khám):\n\n${list}` +
-              (dupInSheet.length > 8 ? '\n  …' : '') +
-              `\n\nBấm OK để BỎ QUA các đợt trùng và chỉ import ${
-                good.length - dupInSheet.length
-              } đợt mới.\nBấm Cancel để dừng lại.`
+          const ok = await confirmDialog(
+            `${list}${dupInSheet.length > 8 ? '\n  …' : ''}\n\nBỏ qua các đợt trùng và chỉ import ${
+              good.length - dupInSheet.length
+            } đợt mới?`,
+            {
+              title: `${dupInSheet.length} đợt khám đã có trong tab "${selectedTab}" (trùng Mã BN + Ngày khám)`,
+              confirmLabel: 'Bỏ qua đợt trùng, import phần còn lại',
+              cancelLabel: 'Dừng lại',
+            }
           );
           if (!ok) return;
           const dupSet = new Set(dupInSheet);
           toImport = good.filter((r) => !dupSet.has(r));
         }
       } catch (e: any) {
-        const ok = window.confirm(
-          'Không kiểm tra được trùng lặp:\n' +
-            (e?.message ?? e) +
-            '\n\nVẫn import? (có thể tạo dòng trùng)'
+        const ok = await confirmDialog(
+          (e?.message ?? e) + '\n\nVẫn import? (có thể tạo dòng trùng)',
+          { title: 'Không kiểm tra được trùng lặp', danger: true, confirmLabel: 'Vẫn import' }
         );
         if (!ok) return;
       }
     } else if (idF && !dateF) {
-      const ok = window.confirm(
-        'Chưa có trường nào được đặt vai trò "Khoá đợt khám" (vd Mã đợt khám / Ngày khám).\n' +
-          'App KHÔNG kiểm tra được trùng lặp — có thể import trùng các đợt đã có.\n\n' +
-          'Vào Cài đặt → Các trường để đặt vai trò này. Vẫn import bây giờ?'
+      const ok = await confirmDialog(
+        'App KHÔNG kiểm tra được trùng lặp — có thể import trùng các đợt đã có.\n\n' +
+          'Vào Cài đặt → Các trường để đặt vai trò này. Vẫn import bây giờ?',
+        {
+          title: 'Chưa có trường nào được đặt vai trò "Khoá đợt khám" (vd Mã đợt khám / Ngày khám)',
+          danger: true,
+          confirmLabel: 'Vẫn import',
+        }
       );
       if (!ok) return;
     }
@@ -324,10 +384,9 @@ export default function App() {
     }
 
     if (parts.length > 0) {
-      const ok = window.confirm(
-        `Trước khi import vào "${selectedTab}":\n\n${parts.join(
-          '\n\n'
-        )}\n\nVẫn import ${toImport.length} dòng?`
+      const ok = await confirmDialog(
+        `${parts.join('\n\n')}\n\nVẫn import ${toImport.length} dòng?`,
+        { title: `Trước khi import vào "${selectedTab}"`, confirmLabel: 'Vẫn import' }
       );
       if (!ok) return;
     }
@@ -337,6 +396,137 @@ export default function App() {
       (g) => g.records
     );
     await doImport(ordered);
+  }
+
+  function onOpenFinalPreview() {
+    if (importingFinal) return;
+    if (!selectedTab) {
+      showToast('Chọn tab đích trước đã.');
+      return;
+    }
+    const idF = idField(activeFields);
+    if (!idF) {
+      showToast(
+        'Cần đặt vai trò "Định danh" (mã bệnh nhân) cho 1 trường để gộp thành dòng tổng hợp.'
+      );
+      return;
+    }
+    const good = records.filter((r) => !r.error);
+    if (!good.length) {
+      showToast('Không có bản ghi hợp lệ để tổng hợp.');
+      return;
+    }
+    setFinalPreview(buildFinalRows(good, activeFields, aggOverrides));
+  }
+
+  function finishFinalImport() {
+    setFinalPreview(null);
+    setFinalDupChoice(null);
+    // KHÔNG xoá records — giữ để bác sĩ còn bấm Import vào tab gốc mà không
+    // phải quét lại PDF. Khoá nút "Lưu vào bản tổng hợp…" (importedToFinal)
+    // để tránh ghi trùng vào tab final lần 2.
+    setImportedToFinal(true);
+  }
+
+  async function onConfirmFinalImport(rows: ExtractedRecord[]) {
+    const finalTitle = finalTabName(selectedTab);
+    const idF = idField(activeFields);
+    setImportingFinal(true);
+    try {
+      // Chống trùng: tab final chỉ nên có 1 dòng/bệnh nhân — đối chiếu Mã BN
+      // đã có sẵn trong tab final trước khi ghi. Có trùng -> hỏi bác sĩ chọn
+      // Cập nhật (ghi đè bản mới) / Bỏ qua / Huỷ qua modal finalDupChoice.
+      if (idF) {
+        try {
+          const existing = new Set(
+            await window.api.existingSingleKeys(finalTitle, idF.label)
+          );
+          const norm = (s: string) => (s ?? '').trim().toLowerCase();
+          const dup = rows.filter((r) => existing.has(norm(r.values[idF.key])));
+          if (dup.length > 0) {
+            setImportingFinal(false);
+            setFinalDupChoice({
+              rows,
+              dupNames: dup.map((r) => r.values[idF.key] || '(mã trống)'),
+            });
+            return;
+          }
+        } catch (e: any) {
+          const ok = await confirmDialog(
+            (e?.message ?? e) + '\n\nVẫn ghi? (có thể tạo dòng trùng)',
+            {
+              title: 'Không kiểm tra được trùng lặp trong bản tổng hợp',
+              danger: true,
+              confirmLabel: 'Vẫn ghi',
+            }
+          );
+          if (!ok) {
+            setImportingFinal(false);
+            return;
+          }
+        }
+      }
+
+      const { appended } = await window.api.appendRows(finalTitle, rows);
+      showToast(`Đã ghi ${appended} dòng tổng hợp vào tab "${finalTitle}".`);
+      finishFinalImport();
+    } catch (e: any) {
+      showToast('Ghi bản tổng hợp thất bại: ' + handleGoogleError(e));
+    } finally {
+      setImportingFinal(false);
+    }
+  }
+
+  // Bác sĩ chọn "Cập nhật": ghi đè toàn bộ (kể cả bệnh nhân trùng) bằng upsert.
+  async function onUpdateFinalDup() {
+    if (!finalDupChoice) return;
+    const finalTitle = finalTabName(selectedTab);
+    const idF = idField(activeFields);
+    if (!idF) return;
+    setImportingFinal(true);
+    try {
+      const { updated, appended } = await window.api.upsertRows(
+        finalTitle,
+        finalDupChoice.rows,
+        idF.key
+      );
+      showToast(
+        `Đã cập nhật ${updated} dòng và thêm mới ${appended} dòng vào tab "${finalTitle}".`
+      );
+      finishFinalImport();
+    } catch (e: any) {
+      showToast('Cập nhật bản tổng hợp thất bại: ' + handleGoogleError(e));
+    } finally {
+      setImportingFinal(false);
+    }
+  }
+
+  // Bác sĩ chọn "Bỏ qua": chỉ ghi các bệnh nhân CHƯA có, giữ nguyên bản cũ.
+  async function onSkipFinalDup() {
+    if (!finalDupChoice) return;
+    const finalTitle = finalTabName(selectedTab);
+    const idF = idField(activeFields);
+    if (!idF) return;
+    const norm = (s: string) => (s ?? '').trim().toLowerCase();
+    const dupSet = new Set(finalDupChoice.dupNames.map(norm));
+    const toWrite = finalDupChoice.rows.filter(
+      (r) => !dupSet.has(norm(r.values[idF.key]))
+    );
+    if (!toWrite.length) {
+      showToast('Tất cả bệnh nhân đều đã có trong bản tổng hợp — không có gì để ghi.');
+      setFinalDupChoice(null);
+      return;
+    }
+    setImportingFinal(true);
+    try {
+      const { appended } = await window.api.appendRows(finalTitle, toWrite);
+      showToast(`Đã ghi ${appended} dòng tổng hợp mới vào tab "${finalTitle}".`);
+      finishFinalImport();
+    } catch (e: any) {
+      showToast('Ghi bản tổng hợp thất bại: ' + handleGoogleError(e));
+    } finally {
+      setImportingFinal(false);
+    }
   }
 
   if (!config) return <div className="loading-screen">Đang tải…</div>;
@@ -483,6 +673,10 @@ export default function App() {
                     readOnly={importing}
                     onChange={setRecords}
                     onOpenPdf={(p, name) => setPdfView({ path: p, name })}
+                    aggOverrides={aggOverrides}
+                    onAggOverride={(k, v) =>
+                      setAggOverrides((prev) => ({ ...prev, [k]: v }))
+                    }
                   />
                   {importing && (
                     <div className="scan-progress">
@@ -549,7 +743,22 @@ export default function App() {
                   <button onClick={onSignIn}>Đăng nhập Google để tiếp tục</button>
                 ) : (
                   <div className="row">
-                    {selectedTab ? (
+                    {importedToMain && importedToFinal ? (
+                      <span className="text-ok">
+                        ✓ Đã import vào tab <strong>{selectedTab}</strong> và
+                        lưu bản tổng hợp. Bấm "Làm lại từ đầu" cho lô hồ sơ mới.
+                      </span>
+                    ) : importedToMain ? (
+                      <span className="text-ok">
+                        ✓ Đã import vào tab <strong>{selectedTab}</strong>. Có
+                        thể tiếp tục "Lưu vào bản tổng hợp…" cho cùng lô này.
+                      </span>
+                    ) : importedToFinal ? (
+                      <span className="text-ok">
+                        ✓ Đã lưu bản tổng hợp. Có thể tiếp tục "Import" vào tab{' '}
+                        <strong>{selectedTab}</strong> cho cùng lô này.
+                      </span>
+                    ) : selectedTab ? (
                       <span>
                         Import {records.filter((r) => !r.error).length} dòng vào tab{' '}
                         <strong>{selectedTab}</strong>
@@ -562,16 +771,40 @@ export default function App() {
                     <button
                       className="secondary"
                       onClick={onReset}
-                      disabled={importing}
+                      disabled={importing || importingFinal}
                       style={{ marginLeft: 'auto' }}
                     >
                       ↺ Làm lại từ đầu
                     </button>
                     <button
-                      onClick={onImport}
-                      disabled={!selectedTab || importing}
+                      className="ghost"
+                      onClick={onOpenFinalPreview}
+                      disabled={
+                        !selectedTab || importing || importingFinal || importedToFinal
+                      }
+                      title={
+                        importedToFinal
+                          ? 'Bản tổng hợp của lô này đã được lưu'
+                          : 'Rút gọn N đợt khám của mỗi bệnh nhân thành 1 dòng, ' +
+                            'ghi vào tab "' +
+                            (selectedTab ? finalTabName(selectedTab) : '...') +
+                            '"'
+                      }
                     >
-                      {importing ? 'Đang import…' : 'Import'}
+                      {importedToFinal ? 'Đã lưu tổng hợp' : 'Lưu vào bản tổng hợp…'}
+                    </button>
+                    <button
+                      onClick={onImport}
+                      disabled={
+                        !selectedTab || importing || importingFinal || importedToMain
+                      }
+                      title={importedToMain ? 'Lô này đã được import' : undefined}
+                    >
+                      {importing
+                        ? 'Đang import…'
+                        : importedToMain
+                        ? 'Đã import'
+                        : 'Import'}
                     </button>
                   </div>
                 )}
@@ -580,6 +813,64 @@ export default function App() {
           </>
         )}
       </div>
+
+      {finalPreview && !finalDupChoice && (
+        <FinalPreview
+          fields={activeFields}
+          rows={finalPreview}
+          finalTabTitle={finalTabName(selectedTab)}
+          onClose={() => setFinalPreview(null)}
+          onConfirm={onConfirmFinalImport}
+        />
+      )}
+
+      {finalDupChoice && (
+        <div className="modal-overlay">
+          <div className="modal">
+            <h3>Bệnh nhân đã có trong bản tổng hợp</h3>
+            <p className="hint">
+              {finalDupChoice.dupNames.length} bệnh nhân dưới đây đã có sẵn 1
+              dòng trong tab "{finalTabName(selectedTab)}":
+            </p>
+            <ul className="cache-file-list">
+              {finalDupChoice.dupNames.map((n, i) => (
+                <li key={i}>{n}</li>
+              ))}
+            </ul>
+            <p className="hint">
+              <strong>Cập nhật</strong>: ghi đè dòng cũ bằng dữ liệu mới nhất
+              (khuyên dùng — tab tổng hợp luôn giữ bản mới nhất/bệnh nhân).
+              <br />
+              <strong>Bỏ qua</strong>: giữ nguyên dòng cũ, chỉ thêm các bệnh
+              nhân chưa có.
+            </p>
+            <div
+              className="row"
+              style={{ justifyContent: 'flex-end', marginTop: 14 }}
+            >
+              <button
+                className="secondary"
+                onClick={() => setFinalDupChoice(null)}
+                disabled={importingFinal}
+              >
+                Huỷ
+              </button>
+              <button
+                className="ghost"
+                onClick={onSkipFinalDup}
+                disabled={importingFinal}
+              >
+                Bỏ qua bệnh nhân trùng
+              </button>
+              <button onClick={onUpdateFinalDup} disabled={importingFinal}>
+                {importingFinal ? 'Đang ghi…' : 'Cập nhật đè bản cũ'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <ConfirmDialogHost />
 
       {toast && <div className="toast">{toast}</div>}
 

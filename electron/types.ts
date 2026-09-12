@@ -7,6 +7,21 @@
  */
 export type FieldRole = 'id' | 'visitkey' | 'fixed' | 'varying';
 
+/**
+ * Cách lọc/tổng hợp giá trị của 1 trường 'varying' qua nhiều đợt khám thành
+ * 1 giá trị duy nhất cho dòng tổng hợp (tab "-final"). Chỉ áp dụng cho role='varying'.
+ * - 'none' : không tổng hợp, bác sĩ tự nhập tay ở dòng chốt (mặc định)
+ * - 'max'  : giá trị số lớn nhất trong các đợt
+ * - 'min'  : giá trị số nhỏ nhất
+ * - 'avg'  : trung bình cộng các giá trị số
+ *
+ * 'latest'/'earliest' (lần khám mới nhất/muộn nhất) đã bị BỎ khỏi lựa chọn —
+ * thứ tự đợt khám không tất định khi thiếu "Khoá đợt khám" (phụ thuộc thứ tự
+ * xử lý song song lúc quét), dễ chọn nhầm đợt. Giữ 2 giá trị này trong type để
+ * không phá dữ liệu cũ đã lưu; `computeAggregate` coi chúng như 'none'.
+ */
+export type AggregateMode = 'none' | 'max' | 'min' | 'avg' | 'latest' | 'earliest';
+
 export interface FieldDef {
   key: string;
   label: string;
@@ -15,6 +30,8 @@ export interface FieldDef {
   example?: string;
   /** vai trò; mặc định 'varying' nếu không set */
   role?: FieldRole;
+  /** chỉ có tác dụng khi role='varying'; mặc định 'none' */
+  aggregate?: AggregateMode;
 }
 
 export interface AppConfig {

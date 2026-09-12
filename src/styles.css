@@ -487,6 +487,19 @@ td.error, td.error .auto-textarea { color: var(--danger); }
 }
 .cache-file-list li { padding: 3px 0; color: var(--text); }
 
+/* ---- Confirm dialog (thay window.confirm) ---- */
+.confirm-modal-text {
+  white-space: pre-line;
+  line-height: 1.5;
+  font-size: 13.5px;
+}
+.confirm-modal-text:first-of-type { margin-top: 0; }
+button.danger-btn {
+  background: var(--danger);
+}
+button.danger-btn:hover { background: #9a1f18; }
+button.danger-btn:active { background: #83190f; }
+
 /* =========================================================
    Spinner & progress
    ========================================================= */
@@ -717,6 +730,35 @@ td.error, td.error .auto-textarea { color: var(--danger); }
   border-color: transparent;
   background: transparent;
   padding: 3px 5px;
+}
+.agg-cell {
+  background: var(--brand-soft);
+  border-left: 2px solid var(--brand);
+}
+.agg-value {
+  font-weight: 650;
+  font-size: 13px;
+  color: var(--text);
+}
+.agg-value.muted {
+  font-weight: 400;
+  font-size: 12px;
+}
+.agg-input {
+  font-weight: 650;
+  background: transparent;
+  border-color: transparent;
+}
+.agg-input:hover { background: rgba(255,255,255,.6); }
+.agg-input:focus { background: var(--surface); }
+.agg-input.muted { font-weight: 400; }
+.agg-input.muted::placeholder { color: var(--text-faint); font-style: italic; }
+.agg-mode {
+  font-size: 10.5px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: .02em;
+  margin-top: 2px;
 }
 .trend {
   font-size: 11px;
