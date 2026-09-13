@@ -60,6 +60,8 @@ export default function FieldsEditor({
 
   const [newTabName, setNewTabName] = useState<string | null>(null);
   const [creatingTab, setCreatingTab] = useState(false);
+  const [dragIdx, setDragIdx] = useState<number | null>(null);
+  const [dragOverIdx, setDragOverIdx] = useState<number | null>(null);
 
   async function loadTabs() {
     const configured = await window.api.configuredTabs();
@@ -190,12 +192,12 @@ export default function FieldsEditor({
   function removeRow(idx: number) {
     setRows((rs) => rs.filter((_, i) => i !== idx));
   }
-  function moveRow(idx: number, dir: -1 | 1) {
+  function moveRowTo(from: number, to: number) {
     setRows((rs) => {
+      if (to < 0 || to >= rs.length || from === to) return rs;
       const next = [...rs];
-      const t = idx + dir;
-      if (t < 0 || t >= next.length) return rs;
-      [next[idx], next[t]] = [next[t], next[idx]];
+      const [moved] = next.splice(from, 1);
+      next.splice(to, 0, moved);
       return next;
     });
   }
@@ -482,17 +484,55 @@ export default function FieldsEditor({
           <table>
             <thead>
               <tr>
+                <th style={{ width: 28 }}></th>
                 <th style={{ width: 140 }}>Tên hiển thị (cột Sheet)</th>
                 <th>Mô tả cho AI</th>
                 <th style={{ width: 110 }}>Ví dụ (tuỳ chọn)</th>
                 <th style={{ width: 120 }}>Vai trò</th>
                 <th style={{ width: 140 }}>Lọc giá trị (nâng cao)</th>
-                <th style={{ width: 110 }}></th>
+                <th style={{ width: 36 }}></th>
               </tr>
             </thead>
             <tbody>
               {rows.map((f, i) => (
-                <tr key={i}>
+                <tr
+                  key={i}
+                  className={
+                    'field-row' +
+                    (dragIdx === i ? ' dragging' : '') +
+                    (dragOverIdx === i && dragIdx !== null && dragIdx !== i
+                      ? ' drag-over'
+                      : '')
+                  }
+                  onDragOver={(e) => {
+                    if (dragIdx === null) return;
+                    e.preventDefault();
+                    if (dragOverIdx !== i) setDragOverIdx(i);
+                  }}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    if (dragIdx !== null) moveRowTo(dragIdx, i);
+                    setDragIdx(null);
+                    setDragOverIdx(null);
+                  }}
+                >
+                  <td className="drag-handle-cell">
+                    <span
+                      className="drag-handle"
+                      draggable
+                      title="Kéo để đổi thứ tự"
+                      onDragStart={(e) => {
+                        e.dataTransfer.effectAllowed = 'move';
+                        setDragIdx(i);
+                      }}
+                      onDragEnd={() => {
+                        setDragIdx(null);
+                        setDragOverIdx(null);
+                      }}
+                    >
+                      ⠿
+                    </span>
+                  </td>
                   <td>
                     <input
                       value={f.label}
@@ -549,32 +589,13 @@ export default function FieldsEditor({
                     )}
                   </td>
                   <td>
-                    <div className="row" style={{ gap: 3, flexWrap: 'nowrap' }}>
-                      <button
-                        className="ghost sm"
-                        onClick={() => moveRow(i, -1)}
-                        disabled={i === 0}
-                        title="Di chuyển lên"
-                      >
-                        ↑
-                      </button>
-                      <button
-                        className="ghost sm"
-                        onClick={() => moveRow(i, 1)}
-                        disabled={i === rows.length - 1}
-                        title="Di chuyển xuống"
-                      >
-                        ↓
-                      </button>
-                      <button
-                        className="link-btn danger"
-                        style={{ marginLeft: 2 }}
-                        onClick={() => removeRow(i)}
-                        title="Xoá trường"
-                      >
-                        ✕
-                      </button>
-                    </div>
+                    <button
+                      className="link-btn danger"
+                      onClick={() => removeRow(i)}
+                      title="Xoá trường"
+                    >
+                      Xoá
+                    </button>
                   </td>
                 </tr>
               ))}

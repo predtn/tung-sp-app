@@ -113,26 +113,26 @@ export default function GoogleSettings({
             />
           </div>
           <div className="field">
-            <label>Spreadsheet ID (lấy từ URL Google Sheet)</label>
+            <div className="row" style={{ justifyContent: 'space-between' }}>
+              <label style={{ margin: 0 }}>
+                Spreadsheet ID (lấy từ URL Google Sheet)
+              </label>
+              {c.spreadsheetId && (
+                <button
+                  type="button"
+                  className="link-btn"
+                  onClick={() => window.api.openSheetExternal(c.spreadsheetId)}
+                  title="Mở Google Sheet này bằng trình duyệt"
+                >
+                  Mở Sheet ↗
+                </button>
+              )}
+            </div>
             <input
               value={c.spreadsheetId}
               placeholder="1AbC...xyz"
               onChange={(e) => set('spreadsheetId', e.target.value)}
             />
-          </div>
-          <div className="row">
-            {signedIn ? (
-              <>
-                <span className="badge ok">Đã đăng nhập</span>
-                <button className="secondary" onClick={onSignOut}>
-                  Đăng xuất
-                </button>
-              </>
-            ) : (
-              <button onClick={handleSignIn} disabled={!canSignIn}>
-                Đăng nhập Google
-              </button>
-            )}
           </div>
           {!canSignIn && !signedIn && (
             <p className="hint text-danger">
@@ -141,13 +141,27 @@ export default function GoogleSettings({
           )}
         </div>
 
-        <div className="row" style={{ marginTop: 20, justifyContent: 'flex-end' }}>
-          <button className="secondary" onClick={onClose}>
-            Đóng
-          </button>
-          <button onClick={handleSave} disabled={saving}>
-            {saving ? 'Đang lưu…' : 'Lưu'}
-          </button>
+        <div className="row settings-section" style={{ marginTop: 0, paddingBottom: 0 }}>
+          {signedIn ? (
+            <>
+              <span className="badge ok">Đã đăng nhập</span>
+              <button className="secondary" onClick={onSignOut}>
+                Đăng xuất
+              </button>
+            </>
+          ) : (
+            <button onClick={handleSignIn} disabled={!canSignIn}>
+              Đăng nhập Google
+            </button>
+          )}
+          <div style={{ marginLeft: 'auto', display: 'flex', gap: 10 }}>
+            <button className="secondary" onClick={onClose}>
+              Đóng
+            </button>
+            <button onClick={handleSave} disabled={saving}>
+              {saving ? 'Đang lưu…' : 'Lưu'}
+            </button>
+          </div>
         </div>
       </div>
     </div>

@@ -48,6 +48,8 @@ const api = {
     ipcRenderer.invoke('process:file', filePath, tab, forceRescan),
   openPdf: (filePath: string): Promise<boolean> =>
     ipcRenderer.invoke('pdf:open', filePath),
+  openSheetExternal: (spreadsheetId: string): Promise<boolean> =>
+    ipcRenderer.invoke('sheets:openExternal', spreadsheetId),
   readPdf: (filePath: string): Promise<Uint8Array> =>
     ipcRenderer.invoke('pdf:read', filePath),
 

@@ -308,6 +308,15 @@ function registerIpc() {
     return true;
   });
 
+  // Mở Google Sheet đích bằng trình duyệt mặc định của hệ điều hành
+  ipcMain.handle('sheets:openExternal', async (_e, spreadsheetId: string) => {
+    if (!spreadsheetId) throw new Error('Chưa có Spreadsheet ID.');
+    await shell.openExternal(
+      `https://docs.google.com/spreadsheets/d/${encodeURIComponent(spreadsheetId)}`
+    );
+    return true;
+  });
+
   // Đọc nội dung file PDF để hiển thị trong panel xem của app
   ipcMain.handle('pdf:read', async (_e, filePath: string): Promise<Uint8Array> => {
     if (!filePath || !fs.existsSync(filePath)) {

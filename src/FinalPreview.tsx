@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import type { ExtractedRecord, FieldDef } from '../electron/types';
+import { finalColumnLabel } from '../electron/tabNaming';
 import AutoTextarea from './AutoTextarea';
 
 interface Props {
@@ -78,7 +79,7 @@ export default function FinalPreview({
               <tr>
                 <th style={{ width: 30 }}>#</th>
                 {fields.map((f) => (
-                  <th key={f.key}>{f.label}</th>
+                  <th key={f.key}>{finalColumnLabel(f)}</th>
                 ))}
               </tr>
             </thead>

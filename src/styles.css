@@ -295,6 +295,24 @@ th {
 }
 tbody tr:hover td { background: #fafcff; }
 
+.drag-handle-cell { text-align: center; padding: 7px 4px; }
+.drag-handle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: var(--r-sm);
+  color: var(--text-faint);
+  font-size: 14px;
+  line-height: 1;
+  cursor: grab;
+  user-select: none;
+}
+.drag-handle:hover { background: var(--surface-3); color: var(--text-muted); }
+.field-row.dragging { opacity: .45; }
+.field-row.drag-over td { box-shadow: inset 0 2px 0 var(--brand); }
+
 .review-main table td:first-child { color: var(--text-faint); text-align: center; }
 
 /* ---- Bảng review có thể kéo giãn cột ---- */
