@@ -67,19 +67,15 @@ export default function GoogleSettings({
             <label>Model</label>
             <CustomSelect
               value={
-                ['gpt-4.1-mini', 'gpt-5-mini', 'gpt-4.1'].includes(c.openaiModel)
+                ['gpt-5-mini', 'gpt-4.1'].includes(c.openaiModel)
                   ? c.openaiModel
-                  : 'gpt-4.1-mini'
+                  : 'gpt-5-mini'
               }
               onChange={(v) => set('openaiModel', v)}
               options={[
                 {
-                  value: 'gpt-4.1-mini',
-                  label: 'gpt-4.1-mini — nhanh, rẻ, đủ tốt cho hồ sơ rõ ràng (khuyên dùng)',
-                },
-                {
                   value: 'gpt-5-mini',
-                  label: 'gpt-5-mini — chính xác hơn, chậm hơn (reasoning)',
+                  label: 'gpt-5-mini — nhanh, rẻ, đủ tốt cho hồ sơ rõ ràng (khuyên dùng)',
                 },
                 {
                   value: 'gpt-4.1',
@@ -89,7 +85,7 @@ export default function GoogleSettings({
             />
             <span className="hint">
               Bác sĩ đã soát từng ô ở bước 2 nên sai nhỏ của model rẻ không nghiêm
-              trọng. Đổi lên gpt-5-mini / gpt-4.1 nếu hồ sơ khó / scan mờ hay bị sai.
+              trọng. Đổi lên gpt-4.1 nếu hồ sơ khó / scan mờ hay bị sai.
             </span>
           </div>
         </div>

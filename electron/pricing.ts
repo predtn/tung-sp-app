@@ -1,13 +1,14 @@
 // Giá tham khảo OpenAI, USD / 1 triệu token (cập nhật thủ công khi giá đổi).
 // Nguồn: https://openai.com/api/pricing
-// Chỉ các model đang dùng trong app (dropdown Cài đặt).
+// gpt-4.1-mini đã bỏ khỏi dropdown Cài đặt nhưng giữ giá ở đây để tính đúng
+// chi phí các lượt quét CŨ (trước khi bỏ) vẫn còn trong lịch sử/cache.
 const PRICING: Record<string, { input: number; output: number }> = {
   'gpt-4.1-mini': { input: 0.4, output: 1.6 },
   'gpt-5-mini': { input: 0.25, output: 2 },
   'gpt-4.1': { input: 2, output: 8 },
 };
 
-const DEFAULT_PRICE = { input: 0.4, output: 1.6 }; // fallback ~ giá gpt-4.1-mini
+const DEFAULT_PRICE = { input: 0.25, output: 2 }; // fallback ~ giá gpt-5-mini
 
 export interface UsageCost {
   promptTokens: number;
@@ -38,5 +39,16 @@ export function estimateCost(
     completionTokens,
     totalTokens: promptTokens + completionTokens,
     estimatedUsd,
+  };
+}
+
+// Cộng dồn chi phí 2 lần gọi AI cho cùng 1 hồ sơ (vd: bước trích xuất +
+// bước suy luận/tính toán riêng cho các trường 'infer').
+export function addUsageCost(a: UsageCost, b: UsageCost): UsageCost {
+  return {
+    promptTokens: a.promptTokens + b.promptTokens,
+    completionTokens: a.completionTokens + b.completionTokens,
+    totalTokens: a.totalTokens + b.totalTokens,
+    estimatedUsd: a.estimatedUsd + b.estimatedUsd,
   };
 }

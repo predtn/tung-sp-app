@@ -1,5 +1,5 @@
-import type { ExtractedRecord, FieldDef } from '../electron/types';
-import type { CellIssue } from './validation';
+import type { ExtractedRecord, FieldDef, CellNote } from '../electron/types';
+import { NOTE_ICON, NOTE_LABEL } from './noteIcons';
 import AutoTextarea from './AutoTextarea';
 import {
   groupByPatient,
@@ -7,52 +7,50 @@ import {
   fixedFields,
   varyingFields,
   fixedConflicts,
-  trendMarks,
   duplicateVisits,
-  computeAggregate,
   aggOverrideKey,
 } from './grouping';
-
-const AGGREGATE_LABEL: Record<string, string> = {
-  max: 'Lớn nhất',
-  min: 'Nhỏ nhất',
-  avg: 'Trung bình',
-  latest: 'Mới nhất',
-  earliest: 'Muộn nhất',
-};
 
 interface Props {
   fields: FieldDef[];
   records: ExtractedRecord[];
-  issues: CellIssue[];
   onChange: (r: ExtractedRecord[]) => void;
   onOpenPdf: (path: string, name: string) => void;
   aggOverrides: Record<string, string>;
   onAggOverride: (key: string, value: string) => void;
+  /** kết quả AI lọc nâng cao, tính tự động sau khi quét xong lô file */
+  aggResults: Record<string, string>;
+  aggNotes: Record<string, CellNote>;
+  /** key bệnh nhân (idValue/sourcePath) còn đang chờ AI lọc nâng cao */
+  aggLoadingKeys: Set<string>;
 }
 
-
-const TREND_ICON = { up: '▲', down: '▼', same: '=' } as const;
-const TREND_CLASS = { up: 'trend-up', down: 'trend-down', same: 'trend-same' } as const;
 
 export default function GroupedReview({
   fields,
   records,
-  issues,
   onChange,
   onOpenPdf,
   aggOverrides,
   onAggOverride,
+  aggResults,
+  aggNotes,
+  aggLoadingKeys,
 }: Props) {
   const groups = groupByPatient(records, fields);
   const idf = idField(fields);
   const fixedF = fixedFields(fields);
   const varyF = varyingFields(fields);
   // có ít nhất 1 trường biến thiên được cấu hình "Lọc giá trị nâng cao" -> hiện thêm cột
-  const hasAggregate = varyF.some((f) => (f.aggregate ?? 'none') !== 'none');
+  const hasAggregate = varyF.some((f) => f.aggregateDescription?.trim());
 
-  const issueMap = new Map<string, string>();
-  for (const it of issues) issueMap.set(`${it.recordIdx}:${it.fieldKey}`, it.message);
+  // bác sĩ tự sửa tay 1 ô -> coi như đã soát xong, xoá note cảnh báo (nếu có)
+  function clearNote(notes: Record<string, CellNote>, key: string) {
+    if (!(key in notes)) return notes;
+    const next = { ...notes };
+    delete next[key];
+    return next;
+  }
 
   function setValue(globalIdx: number, key: string, value: string) {
     onChange(
@@ -61,7 +59,7 @@ export default function GroupedReview({
           ? {
               ...r,
               values: { ...r.values, [key]: value },
-              uncertain: { ...r.uncertain, [key]: false },
+              notes: clearNote(r.notes, key),
             }
           : r
       )
@@ -77,7 +75,7 @@ export default function GroupedReview({
           ? {
               ...r,
               values: { ...r.values, [key]: value },
-              uncertain: { ...r.uncertain, [key]: false },
+              notes: clearNote(r.notes, key),
             }
           : r
       )
@@ -93,9 +91,10 @@ export default function GroupedReview({
       {groups.map((g, gi) => {
         const multi = g.records.length > 1;
         const conflicts = fixedConflicts(g, fields);
-        const trends = trendMarks(g, fields);
         const dupVisits = new Set(duplicateVisits(g, fields));
         const first = g.records[0];
+        const groupKey = g.idValue || g.records[0]?.sourcePath || '';
+        const groupLoading = aggLoadingKeys.has(groupKey);
 
         return (
           <div className="patient-card" key={gi}>
@@ -187,39 +186,23 @@ export default function GroupedReview({
                       <td className="vt-label">{f.label}</td>
                       {g.records.map((r, vi) => {
                         const gIdx = g.indices[vi];
-                        const issue = issueMap.get(`${gIdx}:${f.key}`);
-                        const trend = trends.get(`${vi}:${f.key}`);
+                        const note = r.notes[f.key];
                         return (
                           <td
                             key={vi}
-                            className={
-                              r.error
-                                ? 'error'
-                                : issue
-                                ? 'invalid'
-                                : r.uncertain[f.key]
-                                ? 'uncertain'
-                                : ''
-                            }
-                            title={issue ?? ''}
+                            className={r.error ? 'error' : ''}
                           >
                             <div className="vt-cell">
                               <AutoTextarea
                                 value={r.values[f.key] ?? ''}
                                 onChange={(v) => setValue(gIdx, f.key, v)}
                               />
-                              {trend && (
+                              {note && (
                                 <span
-                                  className={'trend ' + TREND_CLASS[trend]}
-                                  title={
-                                    trend === 'up'
-                                      ? 'Tăng so với đợt trước'
-                                      : trend === 'down'
-                                      ? 'Giảm so với đợt trước'
-                                      : 'Không đổi'
-                                  }
+                                  className="ai-note-icon"
+                                  title={`${NOTE_LABEL[note.type]}: ${note.text}`}
                                 >
-                                  {TREND_ICON[trend]}
+                                  {NOTE_ICON[note.type]}
                                 </span>
                               )}
                             </div>
@@ -229,34 +212,42 @@ export default function GroupedReview({
                       {hasAggregate && (
                         <td className="agg-cell">
                           {(() => {
-                            const mode = f.aggregate ?? 'none';
+                            const desc = f.aggregateDescription?.trim();
                             const key = aggOverrideKey(g, f.key);
                             const overridden = aggOverrides[key];
-                            const auto =
-                              mode === 'none' ? null : computeAggregate(g, f);
-                            const shown =
-                              overridden ?? (mode === 'none' ? '' : auto?.value ?? '');
-                            const isUnavailable =
-                              overridden === undefined &&
-                              mode !== 'none' &&
-                              (auto?.unavailable ?? false);
+                            const shown = overridden ?? (desc ? aggResults[key] ?? '' : '');
+                            const isLoading = !!desc && groupLoading && overridden === undefined;
+                            const note = overridden === undefined ? aggNotes[key] : undefined;
+                            const hasNote = !isLoading && !!desc && !!note;
                             return (
                               <>
-                                <AutoTextarea
-                                  value={shown}
-                                  placeholder={
-                                    isUnavailable
-                                      ? '(chưa tính được)'
-                                      : mode === 'none'
-                                      ? 'Mặc định'
-                                      : 'Nhập tay…'
-                                  }
-                                  className={isUnavailable ? 'agg-input muted' : 'agg-input'}
-                                  onChange={(v) => onAggOverride(key, v)}
-                                />
-                                {mode !== 'none' && (
-                                  <div className="agg-mode">
-                                    {AGGREGATE_LABEL[mode]}
+                                <div className="vt-cell">
+                                  <AutoTextarea
+                                    value={shown}
+                                    placeholder={
+                                      isLoading
+                                        ? 'AI đang lọc…'
+                                        : hasNote
+                                        ? '(chưa lọc được)'
+                                        : desc
+                                        ? 'Nhập tay…'
+                                        : 'Mặc định'
+                                    }
+                                    className={hasNote ? 'agg-input muted' : 'agg-input'}
+                                    onChange={(v) => onAggOverride(key, v)}
+                                  />
+                                  {hasNote && (
+                                    <span
+                                      className="ai-note-icon"
+                                      title={`${NOTE_LABEL[note.type]}: ${note.text}`}
+                                    >
+                                      {NOTE_ICON[note.type]}
+                                    </span>
+                                  )}
+                                </div>
+                                {desc && (
+                                  <div className="agg-mode" title={desc}>
+                                    AI lọc: {desc}
                                     {overridden !== undefined && ' · đã sửa tay'}
                                   </div>
                                 )}

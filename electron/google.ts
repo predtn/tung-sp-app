@@ -370,6 +370,73 @@ export async function updateRowsByKey(
   return updated;
 }
 
+/**
+ * Ghi đè (update) các dòng đã tồn tại theo khoá KÉP ở 2 cột (vd Mã BN + Ngày
+ * khám), dùng cho tab gốc: mỗi đợt khám là 1 dòng, xác định bằng cặp khoá này.
+ * keyColIndexA/B: index của 2 cột khoá trong mỗi phần tử của `rows`.
+ * Trả về số dòng đã update (không tính append — hàm này giả định mọi dòng
+ * truyền vào đều đã có sẵn, gọi appendRows() riêng cho dòng chưa có).
+ */
+export async function updateRowsByKeyPair(
+  clientId: string,
+  clientSecret: string,
+  spreadsheetId: string,
+  tabTitle: string,
+  keyHeaderA: string,
+  keyHeaderB: string,
+  rows: string[][],
+  keyColIndexA: number,
+  keyColIndexB: number
+): Promise<number> {
+  const sheets = google.sheets({ version: 'v4', auth: getClient(clientId, clientSecret) });
+  const resp = await sheets.spreadsheets.values.get({
+    spreadsheetId,
+    range: q(tabTitle),
+    majorDimension: 'ROWS',
+  });
+  const existingRows: string[][] = (resp.data.values as string[][]) ?? [];
+  if (existingRows.length < 1) return 0;
+  const header = existingRows[0];
+  const idxA = header.indexOf(keyHeaderA);
+  const idxB = header.indexOf(keyHeaderB);
+  if (idxA === -1 || idxB === -1) {
+    throw new Error(
+      `Tab "${tabTitle}" chưa có cột "${idxA === -1 ? keyHeaderA : keyHeaderB}" ở hàng tiêu đề.`
+    );
+  }
+
+  // map khoá ghép (chuẩn hoá) -> số dòng thật trên Sheet (1-based)
+  const rowByKey = new Map<string, number>();
+  for (let i = 1; i < existingRows.length; i++) {
+    const k = `${normKey(existingRows[i][idxA])}${KEY_SEP}${normKey(existingRows[i][idxB])}`;
+    if (k !== KEY_SEP) rowByKey.set(k, i + 1); // +1 vì Sheet 1-based, existingRows 0-based
+  }
+
+  let updated = 0;
+  const requests: { range: string; values: string[][] }[] = [];
+  for (const row of rows) {
+    const k = `${normKey(row[keyColIndexA])}${KEY_SEP}${normKey(row[keyColIndexB])}`;
+    const sheetRow = rowByKey.get(k);
+    if (!sheetRow) continue; // không có sẵn -> để appendRows() xử lý riêng
+    const lastCol = colLetter(row.length);
+    requests.push({
+      range: `${q(tabTitle)}!A${sheetRow}:${lastCol}${sheetRow}`,
+      values: [row],
+    });
+    updated++;
+  }
+  if (requests.length === 0) return 0;
+
+  await sheets.spreadsheets.values.batchUpdate({
+    spreadsheetId,
+    requestBody: {
+      valueInputOption: 'RAW',
+      data: requests,
+    },
+  });
+  return updated;
+}
+
 /** Chuyển số cột (1-based) sang ký hiệu cột Sheet (1 -> A, 27 -> AA...). */
 function colLetter(n: number): string {
   let s = '';

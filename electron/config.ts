@@ -5,7 +5,7 @@ import type { AppConfig, FieldDef } from './types';
 
 const DEFAULT_CONFIG: AppConfig = {
   openaiApiKey: '',
-  openaiModel: 'gpt-4.1-mini',
+  openaiModel: 'gpt-5-mini',
   googleClientId: '',
   googleClientSecret: '',
   spreadsheetId: '',
@@ -15,10 +15,20 @@ function configPath(): string {
   return path.join(app.getPath('userData'), 'config.json');
 }
 
+// model đã bỏ khỏi lựa chọn trong Cài đặt -> map sang model thay thế khi đọc
+// config cũ, tránh âm thầm tiếp tục gọi model không còn được hỗ trợ chính thức.
+const MODEL_MIGRATIONS: Record<string, string> = {
+  'gpt-4.1-mini': 'gpt-5-mini',
+};
+
 export function loadConfig(): AppConfig {
   try {
     const raw = fs.readFileSync(configPath(), 'utf-8');
-    return { ...DEFAULT_CONFIG, ...JSON.parse(raw) };
+    const cfg = { ...DEFAULT_CONFIG, ...JSON.parse(raw) };
+    if (cfg.openaiModel in MODEL_MIGRATIONS) {
+      cfg.openaiModel = MODEL_MIGRATIONS[cfg.openaiModel];
+    }
+    return cfg;
   } catch {
     return { ...DEFAULT_CONFIG };
   }

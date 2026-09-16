@@ -211,9 +211,9 @@ button.link-btn.danger:hover { color: #8f1e18; }
   box-shadow: var(--shadow-1);
   margin-bottom: 18px;
 }
-.card > h2 {
+.card h2 {
   margin: 0 0 14px;
-  font-size: 15px;
+  font-size: 21px;
   font-weight: 650;
   color: var(--text);
 }
@@ -396,18 +396,11 @@ td input:focus,
 }
 
 /* cell states — one place */
-td.uncertain input,
-td.uncertain .auto-textarea,
-.card-field.uncertain input,
-.card-field.uncertain .auto-textarea,
 .pf-item.conflict input,
-.pf-item.conflict .auto-textarea,
-.visits-table td.uncertain .auto-textarea {
+.pf-item.conflict .auto-textarea {
   background: var(--warn-cell);
   border-color: var(--warn-border);
 }
-td.uncertain input:hover,
-td.uncertain .auto-textarea:hover { background: #fff2cf; }
 
 td.invalid input,
 td.invalid .auto-textarea,
@@ -591,10 +584,52 @@ button.danger-btn:hover { background: #9a1f18; }
 button.danger-btn:active { background: #83190f; }
 
 /* =========================================================
+   Banner (cảnh báo cố định trong card, khác toast tự ẩn)
+   ========================================================= */
+.banner {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  padding: 10px 14px;
+  border-radius: var(--r-md);
+  font-size: 13px;
+  margin-bottom: 14px;
+}
+.banner.warn {
+  background: var(--warn-soft);
+  border: 1px solid var(--warn-border);
+  color: var(--warn);
+}
+.banner span { flex: 1; min-width: 220px; color: var(--text); }
+
+/* =========================================================
    Spinner & progress
    ========================================================= */
 .spin { animation: spin 1s linear infinite; display: inline-block; }
 @keyframes spin { to { transform: rotate(360deg); } }
+
+.scan-modal {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 16px;
+  padding: 12px 8px 4px;
+}
+.scan-spinner {
+  width: 44px;
+  height: 44px;
+  border: 4px solid var(--surface-3);
+  border-top-color: var(--brand);
+  border-radius: 50%;
+  animation: spin .8s linear infinite;
+}
+.scan-modal-text {
+  font-size: 14px;
+  color: var(--text);
+}
+.scan-modal-text strong { font-size: 16px; }
 
 .scan-progress { margin-top: 14px; }
 .scan-progress-label {
@@ -846,19 +881,17 @@ button.danger-btn:active { background: #83190f; }
 .agg-mode {
   font-size: 10.5px;
   color: var(--text-muted);
-  text-transform: uppercase;
-  letter-spacing: .02em;
   margin-top: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
-.trend {
-  font-size: 11px;
-  font-weight: 700;
+.ai-note-icon {
+  font-size: 12px;
   flex-shrink: 0;
   margin-top: 3px;
+  cursor: help;
 }
-.trend-up { color: var(--danger); }
-.trend-down { color: var(--ok); }
-.trend-same { color: var(--text-faint); }
 
 /* =========================================================
    Review — "Thẻ"

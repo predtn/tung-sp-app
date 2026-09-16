@@ -12,7 +12,12 @@ import {
   deleteFieldsForTab,
 } from './config';
 import { extractPdf, LONG_FILE_WARNING_PAGES } from './pdf';
-import { extractRecord } from './extract';
+import {
+  extractRecord,
+  aggregateFilter,
+  INFER_MISSING_DATA_VALUE,
+  type AggregateFilterField,
+} from './extract';
 import * as gs from './google';
 import { loadHistory, addHistory, clearHistory } from './history';
 import {
@@ -260,7 +265,9 @@ function registerIpc() {
     const fields = tab ? loadFieldsForTab(tab) : loadFields();
     const blank = (error: string): ExtractedRecord => ({
       values: Object.fromEntries(fields.map((f) => [f.key, ''])),
-      uncertain: Object.fromEntries(fields.map((f) => [f.key, true])),
+      notes: Object.fromEntries(
+        fields.map((f) => [f.key, { type: 'missing_info' as const, text: error }])
+      ),
       sourceFile: path.basename(filePath),
       sourcePath: filePath,
       error,
@@ -272,7 +279,7 @@ function registerIpc() {
         if (cached) {
           return {
             values: cached.values,
-            uncertain: cached.uncertain,
+            notes: cached.notes,
             sourceFile: path.basename(filePath),
             sourcePath: filePath,
             fromCache: true,
@@ -295,6 +302,32 @@ function registerIpc() {
     } catch (err: any) {
       return blank(err?.message ?? String(err));
     }
+    }
+  );
+
+  // Lọc nâng cao bằng AI: gộp mọi trường có aggregateDescription của CÙNG 1
+  // bệnh nhân vào 1 lần gọi. Chạy tự động ngay sau khi quét xong toàn bộ lô.
+  ipcMain.handle(
+    'ai:aggregateFilter',
+    async (_e, fields: AggregateFilterField[]) => {
+      const cfg = loadConfig();
+      if (!cfg.openaiApiKey) {
+        const values: Record<string, string> = {};
+        const uncertain: Record<string, boolean> = {};
+        const notes: Record<string, string> = {};
+        for (const f of fields) {
+          values[f.key] = INFER_MISSING_DATA_VALUE;
+          uncertain[f.key] = true;
+          notes[f.key] = 'Chưa cấu hình OpenAI API key trong phần Cài đặt.';
+        }
+        return {
+          values,
+          uncertain,
+          notes,
+          error: 'Chưa cấu hình OpenAI API key trong phần Cài đặt.',
+        };
+      }
+      return aggregateFilter(fields, cfg.openaiApiKey, cfg.openaiModel);
     }
   );
 
@@ -448,6 +481,109 @@ function registerIpc() {
     }
   );
 
+  // Ghi vào tab gốc với khoá KÉP (Mã BN + Khoá đợt khám): đợt khám đã có ->
+  // CẬP NHẬT đè dòng cũ, chưa có -> thêm dòng mới. Dùng khi bác sĩ chọn "Cập
+  // nhật" ở hộp thoại trùng đợt khám (khác "sheets:upsert" chỉ dùng khoá đơn
+  // cho tab "-final").
+  ipcMain.handle(
+    'sheets:upsertPair',
+    async (
+      _e,
+      tabTitle: string,
+      records: ExtractedRecord[],
+      idFieldKey: string,
+      visitFieldKey: string
+    ) => {
+      const cfg = loadConfig();
+      const fields = loadFieldsForTab(tabTitle);
+      const labelOf = isFinalTab(tabTitle) ? finalColumnLabel : (f: FieldDef) => f.label;
+      const headers = fields.map(labelOf);
+      headers.push('Thời gian nhập');
+      const idHeader = fields.find((f) => f.key === idFieldKey)?.label;
+      const idColIdx = fields.findIndex((f) => f.key === idFieldKey);
+      const visitHeader = fields.find((f) => f.key === visitFieldKey)?.label;
+      const visitColIdx = fields.findIndex((f) => f.key === visitFieldKey);
+      if (!idHeader || idColIdx === -1 || !visitHeader || visitColIdx === -1) {
+        throw new Error('Không tìm thấy trường định danh (Mã BN) / Khoá đợt khám trong cấu hình tab.');
+      }
+
+      await gs.withAuth(() =>
+        gs.ensureHeaders(
+          cfg.googleClientId,
+          cfg.googleClientSecret,
+          cfg.spreadsheetId,
+          tabTitle,
+          headers
+        )
+      );
+
+      const now = new Date().toLocaleString('vi-VN');
+      const rows = records.map((r) => {
+        const row = fields.map((f) => r.values[f.key] ?? '');
+        row.push(now);
+        return row;
+      });
+
+      const existing = new Set(
+        await gs.withAuth(() =>
+          gs.existingKeyPairs(
+            cfg.googleClientId,
+            cfg.googleClientSecret,
+            cfg.spreadsheetId,
+            tabTitle,
+            idHeader,
+            visitHeader
+          )
+        )
+      );
+      const norm = (s: string) => (s ?? '').trim().toLowerCase();
+      const keyOf = (row: string[]) => `${norm(row[idColIdx])}${gs.KEY_SEP}${norm(row[visitColIdx])}`;
+      const toUpdate = rows.filter((row) => existing.has(keyOf(row)));
+      const toAppend = rows.filter((row) => !existing.has(keyOf(row)));
+
+      let updated = 0;
+      if (toUpdate.length > 0) {
+        updated = await gs.withAuth(() =>
+          gs.updateRowsByKeyPair(
+            cfg.googleClientId,
+            cfg.googleClientSecret,
+            cfg.spreadsheetId,
+            tabTitle,
+            idHeader,
+            visitHeader,
+            toUpdate,
+            idColIdx,
+            visitColIdx
+          )
+        );
+      }
+
+      let appended = 0;
+      if (toAppend.length > 0) {
+        appended = await gs.withAuth(() =>
+          gs.appendRows(
+            cfg.googleClientId,
+            cfg.googleClientSecret,
+            cfg.spreadsheetId,
+            tabTitle,
+            toAppend
+          )
+        );
+      }
+
+      addHistory({
+        at: new Date().toISOString(),
+        tab: tabTitle,
+        rows: updated + appended,
+        files: records.map((r) => r.sourceFile),
+        estimatedUsd: records.reduce((s, r) => s + (r.usage?.estimatedUsd ?? 0), 0),
+        totalTokens: records.reduce((s, r) => s + (r.usage?.totalTokens ?? 0), 0),
+      });
+
+      return { updated, appended };
+    }
+  );
+
   // Ghi vào tab "-final": bệnh nhân đã có -> CẬP NHẬT đè dòng cũ (bản mới
   // nhất), chưa có -> thêm dòng mới. keyFieldKey là field key của trường
   // role='id' (Mã BN), dùng để xác định dòng nào cần cập nhật.
@@ -595,11 +731,10 @@ function validateFields(fields: FieldDef[]): FieldDef[] {
     const item: FieldDef = { key: uniqueKey, label, description, role };
     if (example) item.example = example;
     if (role === 'varying') {
-      const validAgg = ['none', 'max', 'min', 'avg', 'latest', 'earliest'];
-      item.aggregate = validAgg.includes(raw.aggregate as string)
-        ? (raw.aggregate as FieldDef['aggregate'])
-        : 'none';
+      const aggDesc = (raw.aggregateDescription ?? '').trim();
+      if (aggDesc) item.aggregateDescription = aggDesc;
     }
+    item.mode = raw.mode === 'infer' ? 'infer' : 'extract';
     cleaned.push(item);
   }
   if (idCount > 1) {

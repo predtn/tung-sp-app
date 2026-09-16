@@ -2,7 +2,7 @@ import { app } from 'electron';
 import fs from 'node:fs';
 import crypto from 'node:crypto';
 import path from 'node:path';
-import type { ExtractedRecord, FieldDef } from './types';
+import type { ExtractedRecord, FieldDef, CellNote } from './types';
 
 /**
  * Cache kết quả quét AI theo nội dung file PDF.
@@ -11,7 +11,7 @@ import type { ExtractedRecord, FieldDef } from './types';
 
 interface CacheEntry {
   values: Record<string, string>;
-  uncertain: Record<string, boolean>;
+  notes: Record<string, CellNote>;
   // chữ ký bộ trường lúc quét — đổi trường thì cache cũ không dùng được
   fieldsSig: string;
   model: string;
@@ -29,9 +29,11 @@ export function hashFile(filePath: string): string {
   return crypto.createHash('sha256').update(buf).digest('hex');
 }
 
-/** Chữ ký bộ trường: key + role, để phát hiện thay đổi cấu trúc. */
+/** Chữ ký bộ trường: key + role + mode, để phát hiện thay đổi cấu trúc. */
 export function fieldsSignature(fields: FieldDef[]): string {
-  return fields.map((f) => `${f.key}:${f.role ?? 'varying'}`).join('|');
+  return fields
+    .map((f) => `${f.key}:${f.role ?? 'varying'}:${f.mode ?? 'extract'}`)
+    .join('|');
 }
 
 function readCache(): Record<string, CacheEntry> {
@@ -61,7 +63,7 @@ export function getCached(
 ):
   | {
       values: Record<string, string>;
-      uncertain: Record<string, boolean>;
+      notes: Record<string, CellNote>;
       at: string;
       model: string;
     }
@@ -70,7 +72,7 @@ export function getCached(
   const e = cache[hash];
   if (!e) return null;
   if (e.fieldsSig !== fieldsSignature(fields)) return null;
-  return { values: e.values, uncertain: e.uncertain, at: e.at, model: e.model };
+  return { values: e.values, notes: e.notes, at: e.at, model: e.model };
 }
 
 /** Kiểm tra nhanh: file này đã có cache hợp lệ chưa (dùng để hỏi bác sĩ trước khi quét). */
@@ -99,7 +101,7 @@ export function putCached(
   const cache = readCache();
   cache[hash] = {
     values: rec.values,
-    uncertain: rec.uncertain,
+    notes: rec.notes,
     fieldsSig: fieldsSignature(fields),
     model,
     at: new Date().toISOString(),

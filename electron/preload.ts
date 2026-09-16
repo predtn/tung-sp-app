@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer, webUtils } from 'electron';
 import type { AppConfig, ExtractedRecord, FieldDef, SheetTab } from './types';
 import type { ImportLogEntry } from './history';
 import type { TabSyncPlan } from './google';
+import type { AggregateFilterField, AggregateFilterResult } from './extract';
 
 const api = {
   getConfig: (): Promise<AppConfig> => ipcRenderer.invoke('config:get'),
@@ -48,6 +49,8 @@ const api = {
     ipcRenderer.invoke('process:file', filePath, tab, forceRescan),
   openPdf: (filePath: string): Promise<boolean> =>
     ipcRenderer.invoke('pdf:open', filePath),
+  aggregateFilter: (fields: AggregateFilterField[]): Promise<AggregateFilterResult> =>
+    ipcRenderer.invoke('ai:aggregateFilter', fields),
   openSheetExternal: (spreadsheetId: string): Promise<boolean> =>
     ipcRenderer.invoke('sheets:openExternal', spreadsheetId),
   readPdf: (filePath: string): Promise<Uint8Array> =>
@@ -70,6 +73,13 @@ const api = {
     keyFieldKey: string
   ): Promise<{ updated: number; appended: number }> =>
     ipcRenderer.invoke('sheets:upsert', tabTitle, records, keyFieldKey),
+  upsertRowsByKeyPair: (
+    tabTitle: string,
+    records: ExtractedRecord[],
+    idFieldKey: string,
+    visitFieldKey: string
+  ): Promise<{ updated: number; appended: number }> =>
+    ipcRenderer.invoke('sheets:upsertPair', tabTitle, records, idFieldKey, visitFieldKey),
 
   getHistory: (): Promise<ImportLogEntry[]> => ipcRenderer.invoke('history:get'),
   clearHistory: (): Promise<boolean> => ipcRenderer.invoke('history:clear'),

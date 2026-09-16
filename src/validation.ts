@@ -1,85 +1,36 @@
-import type { ExtractedRecord, FieldDef } from '../electron/types';
+import type { CellNoteType, ExtractedRecord, CellNote } from '../electron/types';
 
-export interface CellIssue {
-  recordIdx: number;
-  fieldKey: string;
-  message: string;
+/** true nếu note thuộc nhóm "cần bác sĩ soát lại" (không tính 'inferred' —
+ * chỉ mang tính tham khảo, AI vẫn tự tin về value). */
+export function isWarningNote(note: CellNote): boolean {
+  return note.type !== 'inferred';
 }
 
-const DATE_RE = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/;
-
-// Đoán trường là ngày / năm sinh dựa trên key + label để validate mềm.
-function looksLikeDate(f: FieldDef): boolean {
-  const s = (f.key + ' ' + f.label).toLowerCase();
-  return /ngay|ngày|date/.test(s) && !/nam sinh|năm sinh/.test(s);
-}
-function looksLikeBirthYear(f: FieldDef): boolean {
-  const s = (f.key + ' ' + f.label).toLowerCase();
-  return /nam sinh|năm sinh|birth|yob/.test(s);
-}
-
-function validDate(v: string): boolean {
-  const m = v.match(DATE_RE);
-  if (!m) return false;
-  const d = +m[1],
-    mo = +m[2],
-    y = +m[3];
-  if (mo < 1 || mo > 12 || d < 1 || d > 31) return false;
-  const dt = new Date(y, mo - 1, d);
-  return dt.getFullYear() === y && dt.getMonth() === mo - 1 && dt.getDate() === d;
-}
-
-/** Trả về danh sách vấn đề định dạng (không chặn, chỉ cảnh báo). */
-export function validateRecords(
-  records: ExtractedRecord[],
-  fields: FieldDef[]
-): CellIssue[] {
-  const issues: CellIssue[] = [];
-  const thisYear = new Date().getFullYear();
-
-  records.forEach((r, ri) => {
-    if (r.error) return;
-    fields.forEach((f) => {
-      const v = (r.values[f.key] ?? '').trim();
-
-      if (looksLikeDate(f) && v && !validDate(v)) {
-        issues.push({
-          recordIdx: ri,
-          fieldKey: f.key,
-          message: `"${f.label}" không đúng định dạng ngày dd/mm/yyyy`,
-        });
-      }
-
-      if (looksLikeBirthYear(f) && v) {
-        const y = Number(v.match(/\d{4}/)?.[0] ?? v);
-        if (!Number.isFinite(y) || y < 1900 || y > thisYear) {
-          issues.push({
-            recordIdx: ri,
-            fieldKey: f.key,
-            message: `"${f.label}" (${v}) không phải năm sinh hợp lệ`,
-          });
-        }
-      }
-    });
-  });
-
-  return issues;
-}
-
-/** Đếm số ô AI đánh dấu không chắc chắn (uncertain), bỏ qua record lỗi. */
-export function countUncertain(records: ExtractedRecord[]): {
+/**
+ * Đếm số ô còn note "cần soát lại" (uncertain/not_found/format_mismatch/
+ * missing_info), bỏ qua record lỗi. Note 'inferred' (AI suy luận thêm, vẫn
+ * tự tin về value) KHÔNG tính vào đây — không phải vấn đề cần cảnh báo trước
+ * khi import. `byType` tách riêng số ô theo từng loại note, để hiển thị đúng
+ * icon/label thay vì gộp chung 1 con số dưới 1 icon duy nhất.
+ */
+export function countWarnings(records: ExtractedRecord[]): {
   cells: number;
   records: number;
+  byType: Partial<Record<CellNoteType, number>>;
 } {
   let cells = 0;
   let recs = 0;
+  const byType: Partial<Record<CellNoteType, number>> = {};
   for (const r of records) {
     if (r.error) continue;
-    const n = Object.values(r.uncertain).filter(Boolean).length;
-    if (n > 0) {
-      cells += n;
+    const warnNotes = Object.values(r.notes).filter(isWarningNote);
+    if (warnNotes.length > 0) {
+      cells += warnNotes.length;
       recs += 1;
+      for (const n of warnNotes) {
+        byType[n.type] = (byType[n.type] ?? 0) + 1;
+      }
     }
   }
-  return { cells, records: recs };
+  return { cells, records: recs, byType };
 }

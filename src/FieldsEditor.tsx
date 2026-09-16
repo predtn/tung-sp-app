@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import type {
-  AggregateMode,
   FieldDef,
+  FieldMode,
   FieldRole,
   SheetTab,
 } from '../electron/types';
@@ -18,18 +18,11 @@ const ROLE_LABEL: Record<FieldRole, string> = {
 };
 const ROLE_ORDER: FieldRole[] = ['id', 'visitkey', 'fixed', 'varying'];
 
-const AGGREGATE_LABEL: Record<AggregateMode, string> = {
-  none: 'Mặc định',
-  max: 'Lớn nhất',
-  min: 'Nhỏ nhất',
-  avg: 'Trung bình',
-  // 'latest'/'earliest' bị bỏ khỏi lựa chọn (thứ tự đợt khám không tất định
-  // khi thiếu Khoá đợt khám) — nhãn vẫn giữ để hiển thị đúng nếu dữ liệu cũ
-  // còn sót giá trị này, nhưng không đưa vào AGGREGATE_ORDER (danh sách chọn).
-  latest: 'Lần khám mới nhất (đã ngừng hỗ trợ)',
-  earliest: 'Lần khám muộn nhất (đã ngừng hỗ trợ)',
+const MODE_LABEL: Record<FieldMode, string> = {
+  extract: 'Trích xuất trực tiếp',
+  infer: 'Để AI suy luận, tính toán',
 };
-const AGGREGATE_ORDER: AggregateMode[] = ['none', 'max', 'min', 'avg'];
+const MODE_ORDER: FieldMode[] = ['extract', 'infer'];
 
 interface Props {
   // bộ trường chung (khi chưa chọn tab)
@@ -168,7 +161,6 @@ export default function FieldsEditor({
         description: '',
         example: '',
         role: 'varying',
-        aggregate: 'none',
       },
     ]);
   }
@@ -179,8 +171,8 @@ export default function FieldsEditor({
           return {
             ...r,
             role,
-            // aggregate chỉ có nghĩa với 'varying' -> đổi vai trò khác thì bỏ
-            aggregate: role === 'varying' ? r.aggregate : undefined,
+            // aggregateDescription chỉ có nghĩa với 'varying' -> đổi vai trò khác thì bỏ
+            aggregateDescription: role === 'varying' ? r.aggregateDescription : undefined,
           };
         // 'id' và 'visitkey' chỉ được 1 trường -> hạ trường cũ cùng vai trò xuống 'varying'
         if ((role === 'id' || role === 'visitkey') && r.role === role)
@@ -207,13 +199,15 @@ export default function FieldsEditor({
       .filter((r) => r.label.trim() !== '')
       .map((r) => {
         const role = r.role ?? 'varying';
+        const aggDesc = (r.aggregateDescription ?? '').trim();
         return {
           key: r.key,
           label: r.label.trim(),
           description: r.description.trim(),
           example: (r.example ?? '').trim() || undefined,
           role,
-          aggregate: role === 'varying' ? r.aggregate ?? 'none' : undefined,
+          aggregateDescription: role === 'varying' && aggDesc ? aggDesc : undefined,
+          mode: r.mode ?? 'extract',
         };
       });
   }
@@ -462,6 +456,21 @@ export default function FieldsEditor({
       </p>
 
       <p className="hint">
+        <strong>Cách lấy giá trị</strong>:
+        <br />
+        • <strong>Trích xuất trực tiếp</strong> (mặc định): AI chỉ lấy thông tin có
+        thật trong hồ sơ, không suy đoán/bịa — dùng cho dữ liệu định danh, chỉ số đo
+        được trực tiếp.
+        <br />
+        • <strong>Để AI suy luận, tính toán</strong>: dùng cho các chỉ số cần TÍNH
+        hoặc TRA CỨU từ dữ liệu khác của cùng hồ sơ (vd BMI từ cân nặng/chiều cao) —
+        AI đọc lại hồ sơ gốc (không chỉ dữ liệu đã trích) và được phép tra cứu web
+        khi cần công thức/bảng chuẩn. Chạy ở 1 lượt gọi AI riêng,{' '}
+        <strong>tốn thêm chi phí gần bằng 1 lượt trích xuất nữa &amp; thời gian
+        mỗi lần quét</strong> nếu hồ sơ có ít nhất 1 trường loại này.
+      </p>
+
+      <p className="hint">
         <strong>Vai trò</strong> giúp app gộp nhiều đợt khám của cùng bệnh nhân:
         <br />
         • <strong>Định danh</strong> (chỉ 1 trường): mã bệnh nhân. Các hồ sơ trùng
@@ -477,6 +486,17 @@ export default function FieldsEditor({
         chẩn đoán) — app xếp cạnh nhau theo đợt để so sánh.
       </p>
 
+      <p className="hint">
+        <strong>Lọc giá trị (nâng cao)</strong> — chỉ áp dụng cho trường{' '}
+        <strong>Biến thiên</strong>: mô tả cách AI chốt 1 giá trị duy nhất từ các
+        đợt khám của cùng bệnh nhân cho dòng tổng hợp (tab "-final"), vd{' '}
+        <code>Lấy giá trị lớn nhất trong các đợt</code> hoặc{' '}
+        <code>Lấy chẩn đoán nặng nhất</code>. Để trống = không lọc, bác sĩ tự
+        nhập tay ở dòng tổng hợp. Có mô tả thì AI chỉ dựa trên các giá trị đã
+        quét được qua các đợt (không tự bịa thêm), chạy tự động ngay sau khi
+        quét xong cả lô file.
+      </p>
+
       {loading ? (
         <p className="muted">Đang tải bộ trường…</p>
       ) : (
@@ -487,6 +507,7 @@ export default function FieldsEditor({
                 <th style={{ width: 28 }}></th>
                 <th style={{ width: 140 }}>Tên hiển thị (cột Sheet)</th>
                 <th>Mô tả cho AI</th>
+                <th style={{ width: 150 }}>Cách lấy giá trị</th>
                 <th style={{ width: 110 }}>Ví dụ (tuỳ chọn)</th>
                 <th style={{ width: 120 }}>Vai trò</th>
                 <th style={{ width: 140 }}>Lọc giá trị (nâng cao)</th>
@@ -548,6 +569,16 @@ export default function FieldsEditor({
                     />
                   </td>
                   <td>
+                    <CustomSelect
+                      value={f.mode ?? 'extract'}
+                      onChange={(v) => update(i, { mode: v as FieldMode })}
+                      options={MODE_ORDER.map((m) => ({
+                        value: m,
+                        label: MODE_LABEL[m],
+                      }))}
+                    />
+                  </td>
+                  <td>
                     <input
                       value={f.example ?? ''}
                       placeholder="VD: 45"
@@ -566,23 +597,13 @@ export default function FieldsEditor({
                   </td>
                   <td>
                     {(f.role ?? 'varying') === 'varying' ? (
-                      <CustomSelect
-                        value={f.aggregate ?? 'none'}
-                        onChange={(v) =>
-                          update(i, { aggregate: v as AggregateMode })
+                      <input
+                        value={f.aggregateDescription ?? ''}
+                        placeholder="VD: Lấy giá trị lớn nhất trong các đợt"
+                        title="Để trống = không lọc, bác sĩ tự nhập tay ở dòng tổng hợp. Có mô tả -> AI tự chốt 1 giá trị theo mô tả này."
+                        onChange={(e) =>
+                          update(i, { aggregateDescription: e.target.value })
                         }
-                        options={[
-                          ...AGGREGATE_ORDER.map((a) => ({
-                            value: a,
-                            label: AGGREGATE_LABEL[a],
-                          })),
-                          // dữ liệu cũ có thể còn 'latest'/'earliest' đã ngừng hỗ
-                          // trợ -> hiện tạm để không tự đổi giá trị field khi user
-                          // chưa động vào; chọn giá trị khác để xoá.
-                          ...(f.aggregate === 'latest' || f.aggregate === 'earliest'
-                            ? [{ value: f.aggregate, label: AGGREGATE_LABEL[f.aggregate] }]
-                            : []),
-                        ]}
                       />
                     ) : (
                       <span className="muted">Mặc định</span>

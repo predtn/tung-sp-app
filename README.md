@@ -36,10 +36,9 @@ File cài đặt nằm trong `release/`.
 ### 1. OpenAI API key
 Bạn đã có. Dán vào **Cài đặt → OpenAI → API Key**.
 
-**Model** (chọn trong Cài đặt): mặc định `gpt-4.1-mini` — nhanh, rẻ, đủ tốt cho hồ sơ rõ
-ràng khi mỗi trường có mô tả + ví dụ; bác sĩ soát lại ở bước 2. Lựa chọn khác: `gpt-5-mini`
-(chính xác hơn nhưng chậm hơn vì là reasoning model), `gpt-4.1` (chính xác cao nhất, đắt
-hơn nhiều — chỉ khi hồ sơ khó / scan mờ).
+**Model** (chọn trong Cài đặt): mặc định `gpt-5-mini` — nhanh, rẻ, đủ tốt cho hồ sơ rõ
+ràng khi mỗi trường có mô tả + ví dụ; bác sĩ soát lại ở bước 2. Lựa chọn khác: `gpt-4.1`
+(chính xác cao nhất, đắt hơn nhiều — chỉ khi hồ sơ khó / scan mờ).
 
 PDF scan được render ở scale 1.5x + JPEG q80 (cạnh dài tối đa 1600px) để giảm token mà vẫn
 đọc được chữ.

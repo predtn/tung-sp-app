@@ -1,12 +1,14 @@
 import { useEffect, useState } from 'react';
-import type { AppConfig, ExtractedRecord, FieldDef, SheetTab } from '../electron/types';
+import type { AppConfig, ExtractedRecord, FieldDef, SheetTab, CellNote, CellNoteType } from '../electron/types';
 import Settings from './Settings';
 import ReviewTable from './ReviewTable';
 import History from './History';
 import PdfPanel from './PdfPanel';
-import { validateRecords, countUncertain } from './validation';
+import { countWarnings } from './validation';
+import { NOTE_ICON, NOTE_LABEL } from './noteIcons';
 import { groupByPatient, idField } from './grouping';
 import { buildFinalRows } from './finalRows';
+import { runAggregateFilter } from './aggregateAi';
 import FinalPreview from './FinalPreview';
 import { finalTabName } from '../electron/tabNaming';
 import ConfirmDialogHost, { confirmDialog } from './ConfirmDialog';
@@ -14,6 +16,23 @@ import CustomSelect from './CustomSelect';
 import GoogleSettings from './GoogleSettings';
 
 type View = 'main' | 'settings' | 'history';
+
+// Thứ tự hiển thị breakdown note theo mức cần chú ý giảm dần — không tìm
+// thấy/sai định dạng (dữ liệu có vấn đề rõ ràng) trước, không chắc chắn/thiếu
+// thông tin (còn đọc được nhưng cần soát) sau. 'inferred' không vào đây vì
+// không tính là warning (xem isWarningNote).
+const WARNING_NOTE_ORDER: CellNoteType[] = [
+  'not_found',
+  'format_mismatch',
+  'uncertain',
+  'missing_info',
+];
+
+function warningBreakdownLines(byType: Partial<Record<CellNoteType, number>>): string[] {
+  return WARNING_NOTE_ORDER.filter((t) => byType[t]).map(
+    (t) => `${NOTE_ICON[t]} ${NOTE_LABEL[t]}: ${byType[t]} ô`
+  );
+}
 
 export default function App() {
   const [view, setView] = useState<View>('main');
@@ -49,8 +68,23 @@ export default function App() {
     rows: ExtractedRecord[];
     dupNames: string[];
   } | null>(null);
+  // hỏi khi có đợt khám (Mã BN + Ngày khám) đã tồn tại trong tab gốc:
+  // Cập nhật (ghi đè bằng giá trị mới, vd bác sĩ vừa sửa tay) / Bỏ qua / Huỷ
+  const [mainDupChoice, setMainDupChoice] = useState<{
+    toImport: ExtractedRecord[];
+    dupRows: ExtractedRecord[];
+    idF: FieldDef;
+    dateF: FieldDef;
+  } | null>(null);
   // bác sĩ sửa tay giá trị "Lọc nâng cao" trong bảng review -> khoá "idValue:fieldKey"
   const [aggOverrides, setAggOverrides] = useState<Record<string, string>>({});
+  // kết quả AI lọc nâng cao (tự động sau khi quét xong lô file), cùng khoá với aggOverrides
+  const [aggResults, setAggResults] = useState<Record<string, string>>({});
+  const [aggNotes, setAggNotes] = useState<Record<string, CellNote>>({});
+  // key bệnh nhân (idValue hoặc sourcePath) còn đang chờ AI lọc nâng cao — theo
+  // từng bệnh nhân thay vì 1 cờ chung cho cả lô, để bệnh nhân đã xong hiện kết
+  // quả ngay, không phải đợi bệnh nhân khác đang bị retry chậm xong hết.
+  const [aggLoadingKeys, setAggLoadingKeys] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     window.api.getConfig().then(setConfig);
@@ -101,21 +135,28 @@ export default function App() {
   // bộ trường dùng để render bảng review = bộ trường của tab đích (nếu có),
   // nếu chưa chọn tab thì dùng bộ chung
   const [activeFields, setActiveFields] = useState<FieldDef[]>([]);
+  // true khi bộ trường vừa đổi (ở Cài đặt) trong lúc đang có kết quả quét dở
+  // -> hiện banner cho bác sĩ chọn quét lại hay bỏ qua.
+  const [fieldsChanged, setFieldsChanged] = useState(false);
+  // true khi bác sĩ đã tự sửa tay ít nhất 1 ô trong bảng review (kể từ lần
+  // quét/quét lại gần nhất) -> cảnh báo trước khi "Quét lại" ghi đè mất.
+  const [hasManualEdits, setHasManualEdits] = useState(false);
 
   async function reloadActiveFields(notifyIfChanged = false) {
     const next = selectedTab
       ? await window.api.getFieldsForTab(selectedTab)
       : await window.api.getFields();
     setActiveFields((prev) => {
+      // So sánh TOÀN BỘ nội dung field (không chỉ key) — sửa mô tả/label/vai
+      // trò/lọc nâng cao của field đã có cũng cần quét lại để AI áp dụng.
+      const sortByKey = (fs: FieldDef[]) =>
+        [...fs].sort((a, b) => a.key.localeCompare(b.key));
       if (
         notifyIfChanged &&
         records.length > 0 &&
-        JSON.stringify(prev.map((f) => f.key)) !==
-          JSON.stringify(next.map((f) => f.key))
+        JSON.stringify(sortByKey(prev)) !== JSON.stringify(sortByKey(next))
       ) {
-        showToast(
-          'Bộ trường vừa thay đổi. Các cột mới sẽ trống ở kết quả đang có — cân nhắc "Làm lại từ đầu".'
-        );
+        setFieldsChanged(true);
       }
       return next;
     });
@@ -145,6 +186,17 @@ export default function App() {
   // Bước đầu: kiểm tra file nào đã có cache. Có -> hỏi bác sĩ. Không -> quét luôn.
   async function startFiles(paths: string[]) {
     if (!paths.length) return;
+    // Quét file mới thay thế toàn bộ lô đang hiển thị (kể cả record cũ bác sĩ
+    // đã sửa tay) -> cảnh báo trước, không âm thầm mất.
+    if (records.length > 0 && hasManualEdits) {
+      const ok = await confirmDialog(
+        'Bạn đã tự sửa tay một số ô ở lô hồ sơ đang hiển thị. Quét file mới sẽ ' +
+          'thay thế lô này trên màn hình và MẤT các sửa tay đó (dữ liệu đã ghi ' +
+          'lên Sheet, nếu có, không bị ảnh hưởng).',
+        { title: 'Mất các sửa tay?', danger: true, confirmLabel: 'Vẫn quét file mới' }
+      );
+      if (!ok) return;
+    }
     // Lô hiện tại đã import xong (đang chờ bác sĩ ghi bản tổng hợp) mà quét
     // thêm file mới sẽ xoá mất dữ liệu đang hiển thị của lô đã import khỏi
     // màn hình (dữ liệu trên Sheet vẫn còn, chỉ mất khỏi UI) -> xác nhận trước.
@@ -179,10 +231,63 @@ export default function App() {
     processFiles(paths, false);
   }
 
+  // Quét lại đúng các file đang có trên màn hình bằng cấu hình field hiện
+  // tại. Dùng cho cả banner báo field vừa đổi lẫn nút "Quét lại" chủ động ở
+  // hàng tiêu đề mục 2. Đi qua đúng luồng peekCache/cacheChoice như lúc nạp
+  // file lần đầu: nếu PDF đã có cache (thường đúng vì vừa quét xong lô này),
+  // để bác sĩ chọn dùng lại cache (rẻ, chỉ chạy lại Lọc nâng cao AI) hay bắt
+  // AI trích xuất lại từ đầu (đắt hơn, cần khi sửa mô tả/label ảnh hưởng
+  // cách AI đọc file).
+  async function rescanCurrentFiles() {
+    const paths = records.map((r) => r.sourcePath).filter(Boolean);
+    if (!paths.length) {
+      setFieldsChanged(false);
+      return;
+    }
+    if (hasManualEdits) {
+      const ok = await confirmDialog(
+        'Bạn đã tự sửa tay một số ô trong bảng review. Quét lại sẽ GHI ĐÈ và ' +
+          'MẤT các sửa tay đó (thay bằng kết quả AI/cache mới).',
+        { title: 'Mất các sửa tay?', danger: true, confirmLabel: 'Vẫn quét lại' }
+      );
+      if (!ok) return;
+    }
+    if (importedToMain || importedToFinal) {
+      const done: string[] = [];
+      if (importedToMain) done.push('import vào tab gốc');
+      if (importedToFinal) done.push('lưu bản tổng hợp');
+      const ok = await confirmDialog(
+        `Lô này đã ${done.join(' và ')}. Quét lại sẽ ghi đè kết quả trên màn ` +
+          'hình này (dữ liệu đã ghi trên Sheet không bị ảnh hưởng), và bạn cần ' +
+          'import/lưu lại nếu muốn cập nhật Sheet theo kết quả mới.',
+        { title: 'Quét lại lô đã ghi?', confirmLabel: 'Quét lại' }
+      );
+      if (!ok) return;
+      setImportedToMain(false);
+      setImportedToFinal(false);
+    }
+    try {
+      const peek = await window.api.peekCache(paths, selectedTab || undefined);
+      const cachedNames = peek.filter((p) => p.cached).map((p) => p.name);
+      if (cachedNames.length > 0) {
+        setCacheChoice({ paths, cachedNames });
+        return;
+      }
+    } catch {
+      // lỗi peek -> cứ quét bình thường
+    }
+    await processFiles(paths, false);
+  }
+
   async function processFiles(paths: string[], forceRescan: boolean) {
     if (!paths.length) return;
     setProcessing(true);
     setProgress({ done: 0, total: paths.length });
+    setAggOverrides({});
+    setAggResults({});
+    setAggNotes({});
+    setFieldsChanged(false);
+    setHasManualEdits(false);
 
     const out: ExtractedRecord[] = new Array(paths.length);
     let done = 0;
@@ -209,6 +314,29 @@ export default function App() {
 
     setRecords(out);
     setProcessing(false);
+
+    // Lọc nâng cao bằng AI: chạy tự động ngay sau khi quét xong TOÀN BỘ lô,
+    // vì cần so sánh giá trị giữa các đợt khám của cùng bệnh nhân (không thể
+    // tính đúng lúc đang quét song song từng file riêng lẻ).
+    if (activeFields.some((f) => f.aggregateDescription?.trim())) {
+      const goodForAgg = out.filter((r) => !r.error);
+      const initialGroups = groupByPatient(goodForAgg, activeFields);
+      setAggLoadingKeys(
+        new Set(initialGroups.map((g) => g.idValue || g.records[0]?.sourcePath || ''))
+      );
+      runAggregateFilter(out, activeFields, (groupKey, snapshot) => {
+        setAggResults({ ...snapshot.results });
+        setAggNotes({ ...snapshot.notes });
+        setAggLoadingKeys((prev) => {
+          const next = new Set(prev);
+          next.delete(groupKey);
+          return next;
+        });
+      }).catch((err) => {
+        console.error('runAggregateFilter thất bại:', err);
+        setAggLoadingKeys(new Set());
+      });
+    }
 
     const errs = out.filter((r) => r.error).length;
     const cached = out.filter((r) => r.fromCache).length;
@@ -250,12 +378,28 @@ export default function App() {
     }
   }
 
-  async function doImport(good: ExtractedRecord[]) {
+  // upsertKeys: có -> gọi upsertRowsByKeyPair (ghi đè đợt trùng bằng giá trị
+  // mới, vd bác sĩ vừa sửa tay), không có -> appendRows như trước (mọi dòng
+  // đều chưa có sẵn, chỉ cần thêm mới).
+  async function doImport(
+    good: ExtractedRecord[],
+    upsertKeys?: { idFieldKey: string; visitFieldKey: string }
+  ) {
     setImporting(true);
     try {
-      const { appended } = await window.api.appendRows(selectedTab, good);
+      const { appended, updated } = upsertKeys
+        ? await window.api.upsertRowsByKeyPair(
+            selectedTab,
+            good,
+            upsertKeys.idFieldKey,
+            upsertKeys.visitFieldKey
+          )
+        : { ...(await window.api.appendRows(selectedTab, good)), updated: 0 };
+      const parts = [];
+      if (appended > 0) parts.push(`thêm ${appended} dòng mới`);
+      if (updated > 0) parts.push(`cập nhật ${updated} dòng đã có`);
       showToast(
-        `Đã import ${appended} dòng vào tab "${selectedTab}". Có thể tiếp tục ` +
+        `Đã ${parts.join(', ')} vào tab "${selectedTab}". Có thể tiếp tục ` +
           `"Lưu vào bản tổng hợp…", hoặc "Làm lại từ đầu" cho lô hồ sơ mới.`
       );
       // KHÔNG xoá records — giữ để bác sĩ còn bấm "Lưu vào bản tổng hợp…" mà
@@ -281,8 +425,12 @@ export default function App() {
     setRecords([]);
     setPdfView(null);
     setAggOverrides({});
+    setAggResults({});
+    setAggNotes({});
+    setFieldsChanged(false);
     setImportedToMain(false);
     setImportedToFinal(false);
+    setMainDupChoice(null);
   }
 
   async function onImport() {
@@ -320,28 +468,8 @@ export default function App() {
           )
         );
         if (dupInSheet.length > 0) {
-          const list = dupInSheet
-            .slice(0, 8)
-            .map(
-              (r) =>
-                `  - ${r.values[idF.key] || '(mã trống)'} · khám ${
-                  r.values[dateF.key] || '(ngày trống)'
-                }`
-            )
-            .join('\n');
-          const ok = await confirmDialog(
-            `${list}${dupInSheet.length > 8 ? '\n  …' : ''}\n\nBỏ qua các đợt trùng và chỉ import ${
-              good.length - dupInSheet.length
-            } đợt mới?`,
-            {
-              title: `${dupInSheet.length} đợt khám đã có trong tab "${selectedTab}" (trùng Mã BN + Ngày khám)`,
-              confirmLabel: 'Bỏ qua đợt trùng, import phần còn lại',
-              cancelLabel: 'Dừng lại',
-            }
-          );
-          if (!ok) return;
-          const dupSet = new Set(dupInSheet);
-          toImport = good.filter((r) => !dupSet.has(r));
+          setMainDupChoice({ toImport: good, dupRows: dupInSheet, idF, dateF });
+          return;
         }
       } catch (e: any) {
         const ok = await confirmDialog(
@@ -362,27 +490,28 @@ export default function App() {
       );
       if (!ok) return;
     }
+    await proceedImport(toImport);
+  }
+
+  // Cảnh báo note còn sót + sắp thứ tự + ghi — dùng chung cho nhánh không có
+  // trùng và nhánh bác sĩ đã xử lý xong hộp thoại trùng đợt khám (Cập nhật/Bỏ qua).
+  async function proceedImport(
+    toImport: ExtractedRecord[],
+    upsertKeys?: { idFieldKey: string; visitFieldKey: string }
+  ) {
     if (!toImport.length) {
       showToast('Tất cả đợt khám đều đã có trong Sheet — không có gì để import.');
       return;
     }
 
-    const issues = validateRecords(toImport, activeFields);
-    const unc = countUncertain(toImport);
+    const warn = countWarnings(toImport);
     const parts: string[] = [];
-    if (unc.cells > 0) {
-      parts.push(
-        `• Còn ${unc.cells} ô AI chưa chắc chắn ở ${unc.records} hồ sơ (ô tô vàng).`
-      );
-    }
-    if (issues.length > 0) {
-      const preview = issues
-        .slice(0, 5)
-        .map((i) => `  - Hồ sơ #${i.recordIdx + 1}: ${i.message}`)
+    if (warn.cells > 0) {
+      const breakdown = warningBreakdownLines(warn.byType)
+        .map((l) => `  - ${l}`)
         .join('\n');
       parts.push(
-        `• ${issues.length} cảnh báo định dạng:\n${preview}` +
-          (issues.length > 5 ? `\n  …và ${issues.length - 5} cảnh báo khác` : '')
+        `• Còn ${warn.cells} ô AI chưa đủ thông tin/không chắc chắn ở ${warn.records} hồ sơ:\n${breakdown}`
       );
     }
 
@@ -398,13 +527,35 @@ export default function App() {
     const ordered = groupByPatient(toImport, activeFields).flatMap(
       (g) => g.records
     );
-    await doImport(ordered);
+    await doImport(ordered, upsertKeys);
+  }
+
+  // Bác sĩ chọn "Cập nhật": ghi đè các đợt trùng bằng giá trị mới (vd vừa sửa
+  // tay), cộng với các đợt chưa có (append).
+  async function onUpdateMainDup() {
+    if (!mainDupChoice) return;
+    const { toImport, idF, dateF } = mainDupChoice;
+    setMainDupChoice(null);
+    await proceedImport(toImport, { idFieldKey: idF.key, visitFieldKey: dateF.key });
+  }
+
+  // Bác sĩ chọn "Bỏ qua": chỉ import các đợt CHƯA có, giữ nguyên bản cũ trên Sheet.
+  async function onSkipMainDup() {
+    if (!mainDupChoice) return;
+    const { toImport, dupRows } = mainDupChoice;
+    setMainDupChoice(null);
+    const dupSet = new Set(dupRows);
+    await proceedImport(toImport.filter((r) => !dupSet.has(r)));
   }
 
   function onOpenFinalPreview() {
     if (importingFinal) return;
     if (!selectedTab) {
       showToast('Chọn tab đích trước đã.');
+      return;
+    }
+    if (aggLoadingKeys.size > 0) {
+      showToast('AI đang lọc giá trị nâng cao, đợi xong rồi thử lại.');
       return;
     }
     const idF = idField(activeFields);
@@ -419,7 +570,7 @@ export default function App() {
       showToast('Không có bản ghi hợp lệ để tổng hợp.');
       return;
     }
-    setFinalPreview(buildFinalRows(good, activeFields, aggOverrides));
+    setFinalPreview(buildFinalRows(good, activeFields, aggOverrides, aggResults, aggNotes));
   }
 
   function finishFinalImport() {
@@ -628,47 +779,62 @@ export default function App() {
                   chọn file
                 </button>
               </div>
-              {processing && (
-                <div className="scan-progress">
-                  <div className="scan-progress-label">
-                    <span>AI đang quét hồ sơ…</span>
-                    <span>
-                      {progress.done}/{progress.total}
-                    </span>
-                  </div>
-                  <div className="progress-track">
-                    <div
-                      className="progress-fill"
-                      style={{
-                        width:
-                          progress.total > 0
-                            ? `${(progress.done / progress.total) * 100}%`
-                            : '0%',
-                      }}
-                    />
+            </div>
+
+            {processing && (
+              <div className="modal-overlay">
+                <div className="modal scan-modal" style={{ maxWidth: 340 }}>
+                  <div className="scan-spinner" />
+                  <div className="scan-modal-text">
+                    AI đang quét hồ sơ…
+                    <br />
+                    Đã quét được <strong>{progress.done}</strong> trên{' '}
+                    <strong>{progress.total}</strong> hồ sơ
                   </div>
                 </div>
-              )}
-            </div>
+              </div>
+            )}
 
             {records.length > 0 && (
               <div className={'card review-wrap' + (pdfView ? ' with-pdf' : '')}>
                 <div className="review-main">
-                  <h2>
-                    2. Kiểm tra &amp; sửa (ô vàng = AI không chắc, ô đỏ = sai định
-                    dạng)
-                  </h2>
+                  <div className="row" style={{ marginBottom: 14 }}>
+                    <h2 style={{ margin: 0 }}>2. Kiểm tra &amp; sửa</h2>
+                    <button
+                      style={{ marginLeft: 'auto' }}
+                      onClick={rescanCurrentFiles}
+                      disabled={processing || importing || importingFinal}
+                      title={`Quét lại ${records.length} file đang hiển thị bằng cấu hình hiện tại`}
+                    >
+                      {processing ? 'Đang quét lại…' : '↻ Quét lại'}
+                    </button>
+                  </div>
+                  {fieldsChanged && (
+                    <div className="banner warn">
+                      <span>
+                        Bộ trường vừa được sửa ở Cài đặt. Kết quả đang hiển thị
+                        có thể không còn đúng — bấm "↻ Quét lại" ở trên nếu
+                        muốn cập nhật {records.length} file này theo cấu hình
+                        mới.
+                      </span>
+                    </div>
+                  )}
                   <ReviewTable
                     fields={activeFields}
                     records={records}
-                    issues={validateRecords(records, activeFields)}
                     readOnly={importing}
-                    onChange={setRecords}
+                    onChange={(r) => {
+                      setHasManualEdits(true);
+                      setRecords(r);
+                    }}
                     onOpenPdf={(p, name) => setPdfView({ path: p, name })}
                     aggOverrides={aggOverrides}
                     onAggOverride={(k, v) =>
                       setAggOverrides((prev) => ({ ...prev, [k]: v }))
                     }
+                    aggResults={aggResults}
+                    aggNotes={aggNotes}
+                    aggLoadingKeys={aggLoadingKeys}
                   />
                   {importing && (
                     <div className="scan-progress">
@@ -772,18 +938,28 @@ export default function App() {
                       className="ghost"
                       onClick={onOpenFinalPreview}
                       disabled={
-                        !selectedTab || importing || importingFinal || importedToFinal
+                        !selectedTab ||
+                        importing ||
+                        importingFinal ||
+                        importedToFinal ||
+                        aggLoadingKeys.size > 0
                       }
                       title={
                         importedToFinal
                           ? 'Bản tổng hợp của lô này đã được lưu'
+                          : aggLoadingKeys.size > 0
+                          ? 'Đang chờ AI lọc giá trị nâng cao…'
                           : 'Rút gọn N đợt khám của mỗi bệnh nhân thành 1 dòng, ' +
                             'ghi vào tab "' +
                             (selectedTab ? finalTabName(selectedTab) : '...') +
                             '"'
                       }
                     >
-                      {importedToFinal ? 'Đã lưu tổng hợp' : 'Lưu vào bản tổng hợp…'}
+                      {importedToFinal
+                        ? 'Đã lưu tổng hợp'
+                        : aggLoadingKeys.size > 0
+                        ? 'AI đang lọc…'
+                        : 'Lưu vào bản tổng hợp…'}
                     </button>
                     <button
                       onClick={onImport}
@@ -856,6 +1032,56 @@ export default function App() {
               </button>
               <button onClick={onUpdateFinalDup} disabled={importingFinal}>
                 {importingFinal ? 'Đang ghi…' : 'Cập nhật đè bản cũ'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {mainDupChoice && (
+        <div className="modal-overlay">
+          <div className="modal">
+            <h3>Đợt khám đã có trong tab "{selectedTab}"</h3>
+            <p className="hint">
+              {mainDupChoice.dupRows.length} đợt khám dưới đây đã có sẵn 1
+              dòng (trùng {mainDupChoice.idF.label} + {mainDupChoice.dateF.label}):
+            </p>
+            <ul className="cache-file-list">
+              {mainDupChoice.dupRows.slice(0, 8).map((r, i) => (
+                <li key={i}>
+                  {r.values[mainDupChoice.idF.key] || '(mã trống)'} · khám{' '}
+                  {r.values[mainDupChoice.dateF.key] || '(ngày trống)'}
+                </li>
+              ))}
+              {mainDupChoice.dupRows.length > 8 && <li>…</li>}
+            </ul>
+            <p className="hint">
+              <strong>Cập nhật</strong>: ghi đè dòng cũ trên Sheet bằng dữ liệu
+              đang hiển thị (dùng khi bạn vừa sửa tay 1 ô rồi import lại).
+              <br />
+              <strong>Bỏ qua</strong>: giữ nguyên dòng cũ, chỉ import các đợt
+              chưa có.
+            </p>
+            <div
+              className="row"
+              style={{ justifyContent: 'flex-end', marginTop: 14 }}
+            >
+              <button
+                className="secondary"
+                onClick={() => setMainDupChoice(null)}
+                disabled={importing}
+              >
+                Huỷ
+              </button>
+              <button
+                className="ghost"
+                onClick={onSkipMainDup}
+                disabled={importing}
+              >
+                Bỏ qua đợt trùng
+              </button>
+              <button onClick={onUpdateMainDup} disabled={importing}>
+                {importing ? 'Đang ghi…' : 'Cập nhật đè bản cũ'}
               </button>
             </div>
           </div>

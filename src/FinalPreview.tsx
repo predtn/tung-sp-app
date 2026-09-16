@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import type { ExtractedRecord, FieldDef } from '../electron/types';
 import { finalColumnLabel } from '../electron/tabNaming';
+import { isWarningNote } from './validation';
+import { NOTE_ICON, NOTE_LABEL } from './noteIcons';
 import AutoTextarea from './AutoTextarea';
 
 interface Props {
@@ -13,8 +15,9 @@ interface Props {
 
 /**
  * Xem trước dòng tổng hợp (1 dòng/bệnh nhân) trước khi ghi vào tab "-final".
- * Ô nào không tính được tự động (aggregate='none' hoặc dữ liệu không phải số
- * thuần) sẽ tô vàng, bắt buộc bác sĩ tự điền hoặc xác nhận để trống.
+ * Ô nào không có giá trị tự động (không cấu hình "Lọc giá trị nâng cao", hoặc
+ * AI không đủ căn cứ để chốt) sẽ có dấu ❓ cạnh ô, bắt buộc bác sĩ tự điền
+ * hoặc xác nhận để trống.
  */
 export default function FinalPreview({
   fields,
@@ -28,20 +31,17 @@ export default function FinalPreview({
 
   function setValue(idx: number, key: string, value: string) {
     setRows((rs) =>
-      rs.map((r, i) =>
-        i === idx
-          ? {
-              ...r,
-              values: { ...r.values, [key]: value },
-              uncertain: { ...r.uncertain, [key]: false },
-            }
-          : r
-      )
+      rs.map((r, i) => {
+        if (i !== idx) return r;
+        const notes = { ...r.notes };
+        delete notes[key];
+        return { ...r, values: { ...r.values, [key]: value }, notes };
+      })
     );
   }
 
   const emptyCount = rows.reduce(
-    (sum, r) => sum + Object.values(r.uncertain).filter(Boolean).length,
+    (sum, r) => sum + Object.values(r.notes).filter(isWarningNote).length,
     0
   );
 
@@ -59,16 +59,14 @@ export default function FinalPreview({
       <div className="modal" style={{ maxWidth: 900 }}>
         <h3>Xem trước dòng tổng hợp — tab "{finalTabTitle}"</h3>
         <p className="hint">
-          Mỗi bệnh nhân rút gọn thành 1 dòng. Ô <strong className="text-warn">
-            vàng
-          </strong>{' '}
-          là chưa có giá trị tự động (chưa cấu hình "Lọc giá trị nâng cao", hoặc
+          Mỗi bệnh nhân rút gọn thành 1 dòng. Ô có dấu <strong>❓</strong> là
+          chưa có giá trị tự động (chưa cấu hình "Lọc giá trị nâng cao", hoặc
           dữ liệu không phải số thuần túy) — điền tay hoặc để trống nếu chấp
           nhận được.
         </p>
 
         {emptyCount > 0 && (
-          <p className="hint text-warn">
+          <p className="hint text-danger">
             Còn {emptyCount} ô chưa có giá trị tự động.
           </p>
         )}
@@ -87,17 +85,27 @@ export default function FinalPreview({
               {rows.map((r, i) => (
                 <tr key={i}>
                   <td>{i + 1}</td>
-                  {fields.map((f) => (
-                    <td
-                      key={f.key}
-                      className={r.uncertain[f.key] ? 'uncertain' : ''}
-                    >
-                      <AutoTextarea
-                        value={r.values[f.key] ?? ''}
-                        onChange={(v) => setValue(i, f.key, v)}
-                      />
-                    </td>
-                  ))}
+                  {fields.map((f) => {
+                    const note = r.notes[f.key];
+                    return (
+                      <td key={f.key}>
+                        <div className="vt-cell">
+                          <AutoTextarea
+                            value={r.values[f.key] ?? ''}
+                            onChange={(v) => setValue(i, f.key, v)}
+                          />
+                          {note && isWarningNote(note) && (
+                            <span
+                              className="ai-note-icon"
+                              title={`${NOTE_LABEL[note.type]}: ${note.text}`}
+                            >
+                              {NOTE_ICON[note.type]}
+                            </span>
+                          )}
+                        </div>
+                      </td>
+                    );
+                  })}
                 </tr>
               ))}
             </tbody>
