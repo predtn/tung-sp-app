@@ -2,6 +2,19 @@ import type { ExtractedRecord, FieldDef, CellNote } from '../electron/types';
 import { groupByPatient, varyingFields, aggOverrideKey, type PatientGroup } from './grouping';
 import { isPlaceholderValue } from '../electron/noteValues';
 
+type AggUsage = { promptTokens: number; completionTokens: number; totalTokens: number; estimatedUsd: number };
+
+function addUsage(a: AggUsage | undefined, b: AggUsage | undefined): AggUsage | undefined {
+  if (!a) return b;
+  if (!b) return a;
+  return {
+    promptTokens: a.promptTokens + b.promptTokens,
+    completionTokens: a.completionTokens + b.completionTokens,
+    totalTokens: a.totalTokens + b.totalTokens,
+    estimatedUsd: a.estimatedUsd + b.estimatedUsd,
+  };
+}
+
 // Gọi song song KHÔNG giới hạn (1 request/bệnh nhân) từng khiến OpenAI trả
 // lỗi rate-limit/timeout khi lô có nhiều bệnh nhân cùng lúc -> bác sĩ thấy ô
 // trống, phải tự bấm "Quét lại" nhiều lần. Giới hạn concurrency để giảm khả
@@ -62,15 +75,17 @@ export async function runAggregateFilter(
   fields: FieldDef[],
   onGroupDone?: (
     groupKey: string,
-    snapshot: { results: Record<string, string>; notes: Record<string, CellNote> }
+    snapshot: { results: Record<string, string>; notes: Record<string, CellNote>; usage?: AggUsage }
   ) => void
 ): Promise<{
   results: Record<string, string>;
   notes: Record<string, CellNote>;
+  usage?: AggUsage;
 }> {
   const varyF = varyingFields(fields).filter((f) => f.aggregateDescription?.trim());
   const results: Record<string, string> = {};
   const notes: Record<string, CellNote> = {};
+  let usage: AggUsage | undefined;
   if (varyF.length === 0) return { results, notes };
 
   const good = records.filter((r) => !r.error);
@@ -131,6 +146,7 @@ export async function runAggregateFilter(
           out.error
         );
       }
+      usage = addUsage(usage, out.usage);
       const stillWarning: string[] = [];
       for (const f of pending) {
         const key = aggOverrideKey(g, f.key);
@@ -146,7 +162,7 @@ export async function runAggregateFilter(
       if (stillWarning.length === 0 || round === MAX_WARNING_RETRIES) break;
       pending = fieldsOf(stillWarning);
     }
-    onGroupDone?.(g.idValue || g.records[0]?.sourcePath || '', { results, notes });
+    onGroupDone?.(g.idValue || g.records[0]?.sourcePath || '', { results, notes, usage });
   }
 
   let next = 0;
@@ -160,5 +176,5 @@ export async function runAggregateFilter(
     Array.from({ length: Math.min(CONCURRENCY, groups.length) }, worker)
   );
 
-  return { results, notes };
+  return { results, notes, usage };
 }

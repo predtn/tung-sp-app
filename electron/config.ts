@@ -5,7 +5,7 @@ import type { AppConfig, FieldDef } from './types';
 
 const DEFAULT_CONFIG: AppConfig = {
   openaiApiKey: '',
-  openaiModel: 'gpt-5-mini',
+  openaiModel: 'gpt-5.6-luna',
   googleClientId: '',
   googleClientSecret: '',
   spreadsheetId: '',
@@ -15,10 +15,13 @@ function configPath(): string {
   return path.join(app.getPath('userData'), 'config.json');
 }
 
-// model đã bỏ khỏi lựa chọn trong Cài đặt -> map sang model thay thế khi đọc
-// config cũ, tránh âm thầm tiếp tục gọi model không còn được hỗ trợ chính thức.
+// App hiện chỉ dùng đúng 1 model (gpt-5.6-luna) cho mọi bước AI -> mọi model
+// cũ khác trong config đã lưu trước đây đều tự động chuyển sang model này khi
+// đọc config, tránh âm thầm tiếp tục gọi model không còn được hỗ trợ chính thức.
 const MODEL_MIGRATIONS: Record<string, string> = {
-  'gpt-4.1-mini': 'gpt-5-mini',
+  'gpt-4.1-mini': 'gpt-5.6-luna',
+  'gpt-5-mini': 'gpt-5.6-luna',
+  'gpt-4.1': 'gpt-5.6-luna',
 };
 
 export function loadConfig(): AppConfig {
@@ -83,6 +86,13 @@ interface FieldsFile {
   fields?: FieldDef[];
   // bộ trường riêng theo tên tab
   byTab?: Record<string, FieldDef[]>;
+  // Tên cột (label) đã dùng lần đồng bộ Google Sheet gần nhất, khoá theo
+  // "tabTitle" -> "fieldKey" -> label. Google Sheet chỉ lưu text tiêu đề cột,
+  // không lưu field key -> app phải TỰ NHỚ ánh xạ này để phân biệt "bác sĩ đổi
+  // label 1 field đã có" (chỉ cần đổi text tiêu đề, giữ nguyên cột dữ liệu)
+  // với "field hoàn toàn mới" (thêm cột) hay "field bị xoá khỏi Cài đặt" (xoá
+  // cột) — xem electron/google.ts -> planTabSync/applyTabSync.
+  syncedLabels?: Record<string, Record<string, string>>;
 }
 
 function readFieldsFile(): FieldsFile {
@@ -144,6 +154,18 @@ export function deleteFieldsForTab(tab: string): void {
   const byTab = { ...f.byTab };
   delete byTab[tab];
   writeFieldsFile({ ...f, byTab });
+}
+
+/** Ánh xạ fieldKey -> label đã dùng lần đồng bộ Sheet gần nhất của 1 tab. */
+export function loadSyncedLabels(tab: string): Record<string, string> {
+  return readFieldsFile().syncedLabels?.[tab] ?? {};
+}
+
+/** Ghi lại ánh xạ fieldKey -> label sau khi đồng bộ (tạo tab / applyTabSync) thành công. */
+export function saveSyncedLabels(tab: string, labels: Record<string, string>): void {
+  const f = readFieldsFile();
+  const syncedLabels = { ...(f.syncedLabels ?? {}), [tab]: labels };
+  writeFieldsFile({ ...f, syncedLabels });
 }
 
 

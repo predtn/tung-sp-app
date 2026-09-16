@@ -315,55 +315,10 @@ tbody tr:hover td { background: #fafcff; }
 
 .review-main table td:first-child { color: var(--text-faint); text-align: center; }
 
-/* ---- Bảng review có thể kéo giãn cột ---- */
-.resizable-table {
-  table-layout: fixed;
-  width: max-content;
-  min-width: 100%;
-}
-.resizable-table th {
-  position: relative;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-  padding-right: 12px;
-}
-.resizable-table th .th-label {
-  display: block;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-/* td: giữ đúng width của col, chữ dài tự xuống dòng (không cắt) */
-.resizable-table td {
-  overflow: hidden;
-  word-break: break-word;
-}
-.resizable-table td .auto-textarea { min-width: 0; }
-.col-resizer {
-  position: absolute;
-  top: 0;
-  right: 0;
-  width: 8px;
-  height: 100%;
-  cursor: col-resize;
-  user-select: none;
-  z-index: 2;
-}
-.col-resizer:hover,
-.col-resizer:active { background: var(--brand); opacity: .35; }
-
-/* tên file nguồn — bọc trong ô, không tràn */
-.src-file {
-  display: inline-block;
-  max-width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  vertical-align: bottom;
-}
 
 /* cell inputs inside data tables */
 td input,
+td textarea,
 .auto-textarea {
   width: 100%;
   min-width: 90px;
@@ -386,8 +341,10 @@ td input,
   word-break: break-word;
 }
 td input:hover,
+td textarea:hover,
 .auto-textarea:hover { background: var(--surface-2); border-color: var(--border-strong); }
 td input:focus,
+td textarea:focus,
 .auto-textarea:focus {
   background: var(--surface);
   border-color: var(--brand);
@@ -401,17 +358,6 @@ td input:focus,
   background: var(--warn-cell);
   border-color: var(--warn-border);
 }
-
-td.invalid input,
-td.invalid .auto-textarea,
-.card-field.invalid input,
-.card-field.invalid .auto-textarea,
-.visits-table td.invalid .auto-textarea {
-  background: var(--danger-soft);
-  border-color: var(--danger-border);
-}
-td.invalid input:hover,
-td.invalid .auto-textarea:hover { background: #fbdede; }
 
 td.error,
 .visits-table td.error { background: var(--danger-soft); }
@@ -756,29 +702,6 @@ button.danger-btn:active { background: #83190f; }
   font-size: 12.5px;
   color: var(--text-muted);
 }
-.seg {
-  display: inline-flex;
-  border: 1px solid var(--border-strong);
-  border-radius: var(--r-sm);
-  overflow: hidden;
-}
-.seg button {
-  border: none;
-  border-radius: 0;
-  padding: 5px 13px;
-  font-size: 13px;
-  font-weight: 500;
-  background: var(--surface);
-  color: var(--text-muted);
-}
-.seg button + button { border-left: 1px solid var(--border-strong); }
-.seg button:hover { background: var(--surface-2); color: var(--text); }
-.seg button.active {
-  background: var(--brand);
-  color: #fff;
-}
-.seg button.active:hover { background: var(--brand-hover); }
-
 /* =========================================================
    Review — "Theo bệnh nhân"
    ========================================================= */
@@ -801,6 +724,12 @@ button.danger-btn:active { background: #83190f; }
   font-size: 14px;
 }
 .patient-visits { color: var(--text-muted); font-size: 12px; }
+.save-cache-btn {
+  background: var(--warn-soft);
+  color: var(--warn);
+  border: 1px solid var(--warn-border);
+}
+.save-cache-btn:hover { background: var(--warn-border); }
 
 .patient-fixed {
   display: grid;
@@ -860,15 +789,6 @@ button.danger-btn:active { background: #83190f; }
   background: var(--brand-soft);
   border-left: 2px solid var(--brand);
 }
-.agg-value {
-  font-weight: 650;
-  font-size: 13px;
-  color: var(--text);
-}
-.agg-value.muted {
-  font-weight: 400;
-  font-size: 12px;
-}
 .agg-input {
   font-weight: 650;
   background: transparent;
@@ -894,80 +814,6 @@ button.danger-btn:active { background: #83190f; }
 }
 
 /* =========================================================
-   Review — "Thẻ"
-   ========================================================= */
-.cards-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
-  gap: 14px;
-}
-.record-card {
-  border: 1px solid var(--border);
-  border-radius: var(--r-md);
-  background: var(--surface);
-  overflow: hidden;
-  box-shadow: var(--shadow-1);
-}
-.record-card.has-error { border-color: var(--danger-border); }
-.record-card-head {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 9px 12px;
-  background: var(--surface-3);
-  border-bottom: 1px solid var(--border);
-  font-size: 13px;
-}
-.record-card-file {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.record-card-file .link-btn {
-  max-width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.record-card-error {
-  padding: 12px;
-  color: var(--danger);
-  background: var(--danger-soft);
-  font-size: 13px;
-}
-.record-card-fields {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-  gap: 10px 14px;
-  padding: 14px;
-}
-.card-field { display: flex; flex-direction: column; gap: 4px; }
-.card-field-label {
-  font-size: 11px;
-  font-weight: 650;
-  color: var(--text-muted);
-  text-transform: uppercase;
-  letter-spacing: .03em;
-}
-.card-field input,
-.card-field .auto-textarea {
-  padding: 6px 8px;
-  border: 1px solid var(--border-strong);
-  border-radius: var(--r-sm);
-  font-size: 13px;
-  width: 100%;
-}
-.card-field-issue { font-size: 11px; color: var(--danger); }
-.record-card-usage {
-  padding: 7px 12px;
-  border-top: 1px solid var(--border);
-  font-size: 11px;
-  color: var(--text-faint);
-}
-
-/* =========================================================
    Misc helpers
    ========================================================= */
 .muted { color: var(--text-muted); }
@@ -978,8 +824,6 @@ button.danger-btn:active { background: #83190f; }
 .text-danger { color: var(--danger); }
 .cell-note { font-size: 11px; margin-top: 2px; }
 .cell-note.danger { color: var(--danger); }
-.form-msg { font-size: 13px; color: var(--text-muted); }
-.form-msg.danger { color: var(--danger); }
 .loading-screen { padding: 32px; text-align: center; color: var(--text-muted); }
 code {
   background: var(--surface-3);

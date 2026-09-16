@@ -9,6 +9,7 @@ import type { TabSyncPlan } from '../electron/google';
 import { finalTabName } from '../electron/tabNaming';
 import { confirmDialog } from './ConfirmDialog';
 import CustomSelect from './CustomSelect';
+import AutoTextarea from './AutoTextarea';
 
 const ROLE_LABEL: Record<FieldRole, string> = {
   id: 'Định danh (mã BN)',
@@ -247,9 +248,16 @@ export default function FieldsEditor({
       } else if (
         plan.addedColumns.length > 0 ||
         plan.removedColumns.length > 0 ||
+        plan.renamedColumns.length > 0 ||
         plan.reordered
       ) {
         const bits: string[] = [];
+        if (plan.renamedColumns.length)
+          bits.push(
+            `đổi tên cột (giữ dữ liệu): ${plan.renamedColumns
+              .map((r) => `"${r.from}" → "${r.to}"`)
+              .join(', ')}`
+          );
         if (plan.addedColumns.length)
           bits.push(`thêm cột: ${plan.addedColumns.join(', ')}`);
         if (plan.removedColumns.length)
@@ -287,11 +295,16 @@ export default function FieldsEditor({
       setMsg('Tab này không còn trên Google Sheet — không đồng bộ được.');
       return;
     }
-    const cleaned = cleanRows();
     const finalTitle = finalTabName(selectedTab);
     setSaving(true);
     setMsg('');
     try {
+      // 0) Sinh key ổn định cho field mới TRƯỚC khi lập kế hoạch đồng bộ —
+      //    nếu không, planTabSync/applyTabSync dùng key rỗng của field chưa
+      //    từng lưu, khiến lần đổi tên SAU đó không nhận ra field đã có key
+      //    thật, coi nhầm là "xoá cột cũ + thêm cột mới" (mất dữ liệu).
+      const cleaned = await window.api.normalizeFields(cleanRows());
+
       // 1) xem trước thay đổi trên cả 2 tab (gốc + final, luôn cùng cấu trúc)
       const [planMain, planFinal] = await Promise.all([
         window.api.planTabSync(selectedTab, cleaned),
@@ -562,10 +575,10 @@ export default function FieldsEditor({
                     />
                   </td>
                   <td>
-                    <input
+                    <AutoTextarea
                       value={f.description}
                       placeholder="VD: Chỉ số men gan AST của đợt khám này"
-                      onChange={(e) => update(i, { description: e.target.value })}
+                      onChange={(v) => update(i, { description: v })}
                     />
                   </td>
                   <td>
@@ -597,12 +610,12 @@ export default function FieldsEditor({
                   </td>
                   <td>
                     {(f.role ?? 'varying') === 'varying' ? (
-                      <input
+                      <AutoTextarea
                         value={f.aggregateDescription ?? ''}
                         placeholder="VD: Lấy giá trị lớn nhất trong các đợt"
                         title="Để trống = không lọc, bác sĩ tự nhập tay ở dòng tổng hợp. Có mô tả -> AI tự chốt 1 giá trị theo mô tả này."
-                        onChange={(e) =>
-                          update(i, { aggregateDescription: e.target.value })
+                        onChange={(v) =>
+                          update(i, { aggregateDescription: v })
                         }
                       />
                     ) : (

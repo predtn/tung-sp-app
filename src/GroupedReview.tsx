@@ -23,8 +23,26 @@ interface Props {
   aggNotes: Record<string, CellNote>;
   /** key bệnh nhân (idValue/sourcePath) còn đang chờ AI lọc nâng cao */
   aggLoadingKeys: Set<string>;
+  /** snapshot values/notes lúc quét xong (khoá theo sourcePath), để so sánh phát hiện sửa tay */
+  originalRecords: Record<string, { values: Record<string, string>; notes: Record<string, CellNote> }>;
+  /** ghi đè cache của mọi file thuộc 1 nhóm bệnh nhân bằng giá trị hiện tại */
+  onSaveGroupToCache: (groupRecords: ExtractedRecord[]) => void;
 }
 
+// So sánh nông 2 object string->string (values) hoặc string->CellNote (notes).
+function shallowEqual(a: Record<string, unknown>, b: Record<string, unknown>): boolean {
+  const keysA = Object.keys(a);
+  const keysB = Object.keys(b);
+  if (keysA.length !== keysB.length) return false;
+  return keysA.every((k) => {
+    const va = a[k];
+    const vb = b[k];
+    if (va && vb && typeof va === 'object' && typeof vb === 'object') {
+      return JSON.stringify(va) === JSON.stringify(vb);
+    }
+    return va === vb;
+  });
+}
 
 export default function GroupedReview({
   fields,
@@ -36,6 +54,8 @@ export default function GroupedReview({
   aggResults,
   aggNotes,
   aggLoadingKeys,
+  originalRecords,
+  onSaveGroupToCache,
 }: Props) {
   const groups = groupByPatient(records, fields);
   const idf = idField(fields);
@@ -86,6 +106,19 @@ export default function GroupedReview({
     onChange(records.filter((_, i) => i !== globalIdx));
   }
 
+  // true nếu ít nhất 1 record của nhóm này khác snapshot lúc quét xong (bác
+  // sĩ đã sửa tay values hoặc notes bị xoá do sửa) -> hiện nút "Lưu cache".
+  function groupHasEdits(groupRecords: ExtractedRecord[]): boolean {
+    return groupRecords.some((r) => {
+      if (r.error || !r.sourcePath) return false;
+      const orig = originalRecords[r.sourcePath];
+      if (!orig) return false; // chưa có snapshot gốc (vd file lấy từ cache lúc mở lại) -> không so sánh được
+      return (
+        !shallowEqual(r.values, orig.values) || !shallowEqual(r.notes, orig.notes)
+      );
+    });
+  }
+
   return (
     <div className="grouped-review">
       {groups.map((g, gi) => {
@@ -95,6 +128,7 @@ export default function GroupedReview({
         const first = g.records[0];
         const groupKey = g.idValue || g.records[0]?.sourcePath || '';
         const groupLoading = aggLoadingKeys.has(groupKey);
+        const hasEdits = groupHasEdits(g.records);
 
         return (
           <div className="patient-card" key={gi}>
@@ -111,6 +145,16 @@ export default function GroupedReview({
               </span>
               {g.records.some((r) => r.error) && (
                 <span className="badge warn">có lỗi quét</span>
+              )}
+              {hasEdits && (
+                <button
+                  className="sm save-cache-btn"
+                  style={{ marginLeft: 'auto' }}
+                  onClick={() => onSaveGroupToCache(g.records)}
+                  title="Ghi đè cache của (các) file PDF thuộc bệnh nhân này bằng giá trị hiện đang hiển thị, để lần sau quét lại cùng file sẽ ra đúng giá trị đã sửa"
+                >
+                  Lưu cache
+                </button>
               )}
             </div>
 

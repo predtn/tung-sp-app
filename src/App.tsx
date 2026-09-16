@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { AppConfig, ExtractedRecord, FieldDef, SheetTab, CellNote, CellNoteType } from '../electron/types';
 import Settings from './Settings';
 import ReviewTable from './ReviewTable';
@@ -11,6 +11,7 @@ import { buildFinalRows } from './finalRows';
 import { runAggregateFilter } from './aggregateAi';
 import FinalPreview from './FinalPreview';
 import { finalTabName } from '../electron/tabNaming';
+import { KEY_SEP } from '../electron/sheetKey';
 import ConfirmDialogHost, { confirmDialog } from './ConfirmDialog';
 import CustomSelect from './CustomSelect';
 import GoogleSettings from './GoogleSettings';
@@ -42,6 +43,13 @@ export default function App() {
   const [showGoogleSettings, setShowGoogleSettings] = useState(false);
 
   const [records, setRecords] = useState<ExtractedRecord[]>([]);
+  // Snapshot values/notes của mỗi record NGAY LÚC quét xong (khoá theo
+  // sourcePath) — dùng để so sánh với records hiện tại, phát hiện bác sĩ đã
+  // sửa tay ô nào chưa lưu vào cache. Cập nhật lại (coi như "đã chốt") mỗi
+  // khi bấm "Lưu cache" thành công, để nút tự ẩn đi cho tới lần sửa tiếp theo.
+  const [originalRecords, setOriginalRecords] = useState<
+    Record<string, { values: Record<string, string>; notes: Record<string, CellNote> }>
+  >({});
   const [processing, setProcessing] = useState(false);
   const [importing, setImporting] = useState(false);
   // true sau khi đã Import lô hiện tại vào tab gốc — giữ nguyên records để
@@ -76,6 +84,12 @@ export default function App() {
     idF: FieldDef;
     dateF: FieldDef;
   } | null>(null);
+  // Số hiệu lô quét hiện tại, tăng mỗi lần processFiles() chạy — runAggregateFilter
+  // chạy nền (không await) nên nếu bác sĩ quét lô mới trong lúc lô cũ còn đang
+  // chờ AI lọc nâng cao, callback onGroupDone của lô CŨ (closure riêng, có thể
+  // resolve trễ) phải tự nhận ra mình đã lỗi thời và bỏ qua, không ghi đè state
+  // của lô MỚI bằng dữ liệu bệnh nhân của lô cũ.
+  const aggGenRef = useRef(0);
   // bác sĩ sửa tay giá trị "Lọc nâng cao" trong bảng review -> khoá "idValue:fieldKey"
   const [aggOverrides, setAggOverrides] = useState<Record<string, string>>({});
   // kết quả AI lọc nâng cao (tự động sau khi quét xong lô file), cùng khoá với aggOverrides
@@ -85,6 +99,10 @@ export default function App() {
   // từng bệnh nhân thay vì 1 cờ chung cho cả lô, để bệnh nhân đã xong hiện kết
   // quả ngay, không phải đợi bệnh nhân khác đang bị retry chậm xong hết.
   const [aggLoadingKeys, setAggLoadingKeys] = useState<Set<string>>(new Set());
+  // Chi phí riêng của bước "Lọc nâng cao" — TÁCH khỏi records[].usage (chi
+  // phí trích xuất + suy luận) để hiển thị breakdown theo từng bước, dù cả 2
+  // đều gọi cùng 1 model (cfg.openaiModel).
+  const [aggUsage, setAggUsage] = useState<ExtractedRecord['usage']>(undefined);
 
   useEffect(() => {
     window.api.getConfig().then(setConfig);
@@ -286,8 +304,10 @@ export default function App() {
     setAggOverrides({});
     setAggResults({});
     setAggNotes({});
+    setAggUsage(undefined);
     setFieldsChanged(false);
     setHasManualEdits(false);
+    setOriginalRecords({});
 
     const out: ExtractedRecord[] = new Array(paths.length);
     let done = 0;
@@ -314,10 +334,22 @@ export default function App() {
 
     setRecords(out);
     setProcessing(false);
+    // Snapshot ngay lúc quét xong (trước khi bác sĩ kịp sửa tay) — bỏ qua
+    // record lỗi/không có sourcePath, không có gì để lưu cache cho chúng.
+    const snapshot: Record<
+      string,
+      { values: Record<string, string>; notes: Record<string, CellNote> }
+    > = {};
+    for (const r of out) {
+      if (r.error || !r.sourcePath) continue;
+      snapshot[r.sourcePath] = { values: { ...r.values }, notes: { ...r.notes } };
+    }
+    setOriginalRecords(snapshot);
 
     // Lọc nâng cao bằng AI: chạy tự động ngay sau khi quét xong TOÀN BỘ lô,
     // vì cần so sánh giá trị giữa các đợt khám của cùng bệnh nhân (không thể
     // tính đúng lúc đang quét song song từng file riêng lẻ).
+    const myGen = ++aggGenRef.current;
     if (activeFields.some((f) => f.aggregateDescription?.trim())) {
       const goodForAgg = out.filter((r) => !r.error);
       const initialGroups = groupByPatient(goodForAgg, activeFields);
@@ -325,8 +357,13 @@ export default function App() {
         new Set(initialGroups.map((g) => g.idValue || g.records[0]?.sourcePath || ''))
       );
       runAggregateFilter(out, activeFields, (groupKey, snapshot) => {
+        // Lô đã bị thay bằng 1 lượt quét mới hơn (bác sĩ bấm "Quét lại"/quét
+        // lô khác trong lúc lô này còn đang chờ AI) -> bỏ qua, không ghi đè
+        // state hiện tại bằng dữ liệu bệnh nhân của lô đã lỗi thời.
+        if (aggGenRef.current !== myGen) return;
         setAggResults({ ...snapshot.results });
         setAggNotes({ ...snapshot.notes });
+        setAggUsage(snapshot.usage);
         setAggLoadingKeys((prev) => {
           const next = new Set(prev);
           next.delete(groupKey);
@@ -334,7 +371,7 @@ export default function App() {
         });
       }).catch((err) => {
         console.error('runAggregateFilter thất bại:', err);
-        setAggLoadingKeys(new Set());
+        if (aggGenRef.current === myGen) setAggLoadingKeys(new Set());
       });
     }
 
@@ -431,6 +468,43 @@ export default function App() {
     setImportedToMain(false);
     setImportedToFinal(false);
     setMainDupChoice(null);
+    setOriginalRecords({});
+  }
+
+  // Ghi đè cache của MỌI file PDF thuộc nhóm bệnh nhân này bằng giá trị hiện
+  // đang hiển thị (đã bao gồm sửa tay) — lần sau quét lại đúng (các) file này
+  // sẽ trả về giá trị đã sửa thay vì giá trị AI đọc gốc. "Chốt" lại snapshot
+  // gốc theo giá trị mới để nút "Lưu cache" tự ẩn đi cho tới lần sửa tiếp theo.
+  async function saveGroupToCache(groupRecords: ExtractedRecord[]) {
+    const targets = groupRecords.filter((r) => !r.error && r.sourcePath);
+    if (!targets.length) return;
+    try {
+      const results = await Promise.all(
+        targets.map((r) =>
+          window.api.updateCacheValues(r.sourcePath, r.values, r.notes, selectedTab || undefined)
+        )
+      );
+      const failed = results.filter((ok) => !ok).length;
+      setOriginalRecords((prev) => {
+        const next = { ...prev };
+        targets.forEach((r, i) => {
+          if (results[i]) {
+            next[r.sourcePath] = { values: { ...r.values }, notes: { ...r.notes } };
+          }
+        });
+        return next;
+      });
+      if (failed > 0) {
+        showToast(
+          `Đã lưu cache ${targets.length - failed}/${targets.length} file — ` +
+            `${failed} file chưa có cache gốc để ghi đè (chưa từng quét thành công).`
+        );
+      } else {
+        showToast(`Đã lưu ${targets.length} file vào cache.`);
+      }
+    } catch (e: any) {
+      showToast('Lưu cache thất bại: ' + (e?.message ?? String(e)));
+    }
   }
 
   async function onImport() {
@@ -460,7 +534,6 @@ export default function App() {
         const existing = new Set(
           await window.api.existingKeys(selectedTab, idF.label, dateF.label)
         );
-        const KEY_SEP = '||';
         const norm = (s: string) => (s ?? '').trim().toLowerCase();
         const dupInSheet = good.filter((r) =>
           existing.has(
@@ -835,6 +908,8 @@ export default function App() {
                     aggResults={aggResults}
                     aggNotes={aggNotes}
                     aggLoadingKeys={aggLoadingKeys}
+                    originalRecords={originalRecords}
+                    onSaveGroupToCache={saveGroupToCache}
                   />
                   {importing && (
                     <div className="scan-progress">
@@ -846,35 +921,51 @@ export default function App() {
                       </div>
                     </div>
                   )}
-                  <p className="hint" style={{ marginTop: 10 }}>
-                    Tổng chi phí OpenAI ước tính:{' '}
-                    <strong>
-                      $
-                      {records
-                        .reduce((sum, r) => sum + (r.usage?.estimatedUsd ?? 0), 0)
-                        .toFixed(4)}
-                    </strong>{' '}
-                    (
-                    {records
-                      .reduce((sum, r) => sum + (r.usage?.totalTokens ?? 0), 0)
-                      .toLocaleString('vi-VN')}{' '}
-                    token)
-                    {records.some((r) => r.fromCache) && (
-                      <>
-                        {' '}
-                        · {records.filter((r) => r.fromCache).length} file lấy từ
-                        bản đã quét, không tính phí
-                      </>
-                    )}{' '}
-                    — chỉ là ước tính, xem chính xác tại{' '}
-                    <a
-                      href="https://platform.openai.com/usage"
-                      target="_blank"
-                      rel="noreferrer"
-                    >
-                      platform.openai.com/usage
-                    </a>
-                  </p>
+                  {(() => {
+                    const extractUsd = records.reduce(
+                      (sum, r) => sum + (r.usage?.estimatedUsd ?? 0),
+                      0
+                    );
+                    const extractTokens = records.reduce(
+                      (sum, r) => sum + (r.usage?.totalTokens ?? 0),
+                      0
+                    );
+                    const aggUsd = aggUsage?.estimatedUsd ?? 0;
+                    const aggTokens = aggUsage?.totalTokens ?? 0;
+                    const totalUsd = extractUsd + aggUsd;
+                    const totalTokens = extractTokens + aggTokens;
+                    return (
+                      <p className="hint" style={{ marginTop: 10 }}>
+                        Trích xuất &amp; suy luận: $
+                        {extractUsd.toFixed(4)} (
+                        {extractTokens.toLocaleString('vi-VN')} token)
+                        {records.some((r) => r.fromCache) && (
+                          <>
+                            {' '}
+                            · {records.filter((r) => r.fromCache).length} file lấy
+                            từ bản đã quét, không tính phí
+                          </>
+                        )}
+                        <br />
+                        Lọc giá trị nâng cao: $
+                        {aggUsd.toFixed(4)} ({aggTokens.toLocaleString('vi-VN')}{' '}
+                        token)
+                        {aggLoadingKeys.size > 0 && ' · đang chạy…'}
+                        <br />
+                        Tổng chi phí OpenAI ước tính:{' '}
+                        <strong>${totalUsd.toFixed(4)}</strong> (
+                        {totalTokens.toLocaleString('vi-VN')} token) — chỉ là ước
+                        tính, xem chính xác tại{' '}
+                        <a
+                          href="https://platform.openai.com/usage"
+                          target="_blank"
+                          rel="noreferrer"
+                        >
+                          platform.openai.com/usage
+                        </a>
+                      </p>
+                    );
+                  })()}
                 </div>
 
                 {pdfView && (

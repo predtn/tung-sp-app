@@ -15,6 +15,10 @@ interface Props {
   aggNotes: Record<string, CellNote>;
   /** key bệnh nhân (idValue/sourcePath) còn đang chờ AI lọc nâng cao */
   aggLoadingKeys: Set<string>;
+  /** snapshot values/notes lúc quét xong (khoá theo sourcePath), để so sánh phát hiện sửa tay */
+  originalRecords: Record<string, { values: Record<string, string>; notes: Record<string, CellNote> }>;
+  /** ghi đè cache của mọi file thuộc 1 nhóm bệnh nhân bằng giá trị hiện tại */
+  onSaveGroupToCache: (groupRecords: ExtractedRecord[]) => void;
 }
 
 export default function ReviewTable({
@@ -28,6 +32,8 @@ export default function ReviewTable({
   aggResults,
   aggNotes,
   aggLoadingKeys,
+  originalRecords,
+  onSaveGroupToCache,
 }: Props) {
   return (
     <div
@@ -49,6 +55,8 @@ export default function ReviewTable({
         aggResults={aggResults}
         aggNotes={aggNotes}
         aggLoadingKeys={aggLoadingKeys}
+        originalRecords={originalRecords}
+        onSaveGroupToCache={onSaveGroupToCache}
       />
     </div>
   );

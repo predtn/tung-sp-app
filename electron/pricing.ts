@@ -1,14 +1,18 @@
 // Giá tham khảo OpenAI, USD / 1 triệu token (cập nhật thủ công khi giá đổi).
-// Nguồn: https://openai.com/api/pricing
-// gpt-4.1-mini đã bỏ khỏi dropdown Cài đặt nhưng giữ giá ở đây để tính đúng
-// chi phí các lượt quét CŨ (trước khi bỏ) vẫn còn trong lịch sử/cache.
+// App hiện chỉ dùng đúng 1 model (gpt-5.6-luna) cho mọi bước AI — trích xuất,
+// suy luận/tính toán, và lọc giá trị nâng cao. Các model cũ (gpt-4.1-mini,
+// gpt-5-mini, gpt-4.1) đã bỏ hẳn, chi phí của các lượt quét CŨ còn sót trong
+// lịch sử/cache (nếu có) sẽ không còn tính đúng, rơi về giá fallback bên dưới.
 const PRICING: Record<string, { input: number; output: number }> = {
-  'gpt-4.1-mini': { input: 0.4, output: 1.6 },
-  'gpt-5-mini': { input: 0.25, output: 2 },
-  'gpt-4.1': { input: 2, output: 8 },
+  // NGUỒN CHƯA XÁC MINH — lấy từ developers.openai.com (không phải domain
+  // chính thức platform.openai.com), trang ghi "knowledge cutoff: Feb 16,
+  // 2026" (mâu thuẫn logic). Không có cách xác nhận độc lập số này đúng —
+  // chi phí ước tính hiển thị cho model này có thể sai lệch so với hoá đơn
+  // thật, cần đối chiếu lại tại platform.openai.com/usage.
+  'gpt-5.6-luna': { input: 0.2, output: 1.2 },
 };
 
-const DEFAULT_PRICE = { input: 0.25, output: 2 }; // fallback ~ giá gpt-5-mini
+const DEFAULT_PRICE = { input: 0.2, output: 1.2 }; // fallback = giá gpt-5.6-luna
 
 export interface UsageCost {
   promptTokens: number;

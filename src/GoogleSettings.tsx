@@ -1,6 +1,5 @@
 import { useState } from 'react';
 import type { AppConfig } from '../electron/types';
-import CustomSelect from './CustomSelect';
 
 interface Props {
   config: AppConfig;
@@ -65,27 +64,10 @@ export default function GoogleSettings({
           </div>
           <div className="field">
             <label>Model</label>
-            <CustomSelect
-              value={
-                ['gpt-5-mini', 'gpt-4.1'].includes(c.openaiModel)
-                  ? c.openaiModel
-                  : 'gpt-5-mini'
-              }
-              onChange={(v) => set('openaiModel', v)}
-              options={[
-                {
-                  value: 'gpt-5-mini',
-                  label: 'gpt-5-mini — nhanh, rẻ, đủ tốt cho hồ sơ rõ ràng (khuyên dùng)',
-                },
-                {
-                  value: 'gpt-4.1',
-                  label: 'gpt-4.1 — chính xác cao nhất, đắt hơn nhiều',
-                },
-              ]}
-            />
+            <input value="gpt-5.6-luna" disabled />
             <span className="hint">
-              Bác sĩ đã soát từng ô ở bước 2 nên sai nhỏ của model rẻ không nghiêm
-              trọng. Đổi lên gpt-4.1 nếu hồ sơ khó / scan mờ hay bị sai.
+              App hiện chỉ dùng 1 model (gpt-5.6-luna) cho mọi bước AI — trích
+              xuất, suy luận/tính toán (web search), và lọc giá trị nâng cao.
             </span>
           </div>
         </div>

@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron';
-import type { AppConfig, ExtractedRecord, FieldDef, SheetTab } from './types';
+import type { AppConfig, CellNote, ExtractedRecord, FieldDef, SheetTab } from './types';
 import type { ImportLogEntry } from './history';
 import type { TabSyncPlan } from './google';
 import type { AggregateFilterField, AggregateFilterResult } from './extract';
@@ -10,6 +10,9 @@ const api = {
   getFields: (): Promise<FieldDef[]> => ipcRenderer.invoke('fields:get'),
   setFields: (fields: FieldDef[]): Promise<FieldDef[]> =>
     ipcRenderer.invoke('fields:set', fields),
+  /** Sinh key ổn định cho field chưa có key, KHÔNG lưu gì. */
+  normalizeFields: (fields: FieldDef[]): Promise<FieldDef[]> =>
+    ipcRenderer.invoke('fields:normalize', fields),
   getFieldsForTab: (tab: string): Promise<FieldDef[]> =>
     ipcRenderer.invoke('fields:getForTab', tab),
   setFieldsForTab: (tab: string, fields: FieldDef[]): Promise<FieldDef[]> =>
@@ -47,6 +50,13 @@ const api = {
     forceRescan?: boolean
   ): Promise<ExtractedRecord> =>
     ipcRenderer.invoke('process:file', filePath, tab, forceRescan),
+  updateCacheValues: (
+    filePath: string,
+    values: Record<string, string>,
+    notes: Record<string, CellNote>,
+    tab?: string
+  ): Promise<boolean> =>
+    ipcRenderer.invoke('cache:updateValues', filePath, values, notes, tab),
   openPdf: (filePath: string): Promise<boolean> =>
     ipcRenderer.invoke('pdf:open', filePath),
   aggregateFilter: (fields: AggregateFilterField[]): Promise<AggregateFilterResult> =>

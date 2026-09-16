@@ -6,6 +6,7 @@ import { google } from 'googleapis';
 import { OAuth2Client } from 'google-auth-library';
 import { tokenPath } from './config';
 import type { SheetTab } from './types';
+import { KEY_SEP, normKey } from './sheetKey';
 
 const SCOPES = ['https://www.googleapis.com/auth/spreadsheets'];
 const REDIRECT_PORT = 42813;
@@ -148,12 +149,7 @@ function q(tabTitle: string): string {
   return `'${tabTitle.replace(/'/g, "''")}'`;
 }
 
-/** Ký tự ngăn cách khi ghép khoá kép — dùng chung ở main lẫn renderer. */
-export const KEY_SEP = '||';
-
-export function normKey(s: string | undefined): string {
-  return (s ?? '').toString().trim().toLowerCase();
-}
+export { KEY_SEP, normKey };
 
 /**
  * Đọc các cặp (giá trị cột A, giá trị cột B) đã có trong tab, để renderer đối chiếu trùng.
@@ -345,9 +341,18 @@ export async function updateRowsByKey(
     if (k) rowByKey.set(k, i + 1); // +1 vì Sheet 1-based, existingRows 0-based
   }
 
+  // Nếu `rows` chứa nhiều phần tử cùng khoá (bác sĩ lỡ quét trùng 1 đợt khám
+  // 2 lần trong cùng lô), chúng map ra CÙNG sheetRow -> nhiều request cùng
+  // range trong 1 batchUpdate, và updated bị đếm thừa. Khử trùng theo khoá,
+  // giữ bản ghi CUỐI (dữ liệu mới nhất trong input) trước khi build request.
+  const rowsByKey = new Map<string, string[]>();
+  for (const row of rows) {
+    rowsByKey.set(normKey(row[keyColIndexInRow]), row);
+  }
+
   let updated = 0;
   const requests: { range: string; values: string[][] }[] = [];
-  for (const row of rows) {
+  for (const row of rowsByKey.values()) {
     const k = normKey(row[keyColIndexInRow]);
     const sheetRow = rowByKey.get(k);
     if (!sheetRow) continue; // không có sẵn -> để appendRows() xử lý riêng
@@ -412,10 +417,16 @@ export async function updateRowsByKeyPair(
     if (k !== KEY_SEP) rowByKey.set(k, i + 1); // +1 vì Sheet 1-based, existingRows 0-based
   }
 
+  // Khử trùng theo khoá kép (xem giải thích tương tự ở updateRowsByKey) —
+  // giữ bản ghi CUỐI nếu rows có nhiều phần tử cùng khoá.
+  const rowsByKey = new Map<string, string[]>();
+  for (const row of rows) {
+    rowsByKey.set(`${normKey(row[keyColIndexA])}${KEY_SEP}${normKey(row[keyColIndexB])}`, row);
+  }
+
   let updated = 0;
   const requests: { range: string; values: string[][] }[] = [];
-  for (const row of rows) {
-    const k = `${normKey(row[keyColIndexA])}${KEY_SEP}${normKey(row[keyColIndexB])}`;
+  for (const [k, row] of rowsByKey) {
     const sheetRow = rowByKey.get(k);
     if (!sheetRow) continue; // không có sẵn -> để appendRows() xử lý riêng
     const lastCol = colLetter(row.length);
@@ -480,6 +491,8 @@ export interface TabSyncPlan {
   /** cột sẽ bị xoá cùng dữ liệu: tên + số ô có nội dung bên dưới */
   removedColumns: { name: string; nonEmptyCells: number }[];
   addedColumns: string[];
+  /** cột chỉ đổi TÊN (field key không đổi) -> giữ nguyên dữ liệu, không tính vào removed/added */
+  renamedColumns: { from: string; to: string }[];
   reordered: boolean;
   dataRowCount: number;
 }
@@ -503,7 +516,8 @@ export async function planTabSync(
   clientSecret: string,
   spreadsheetId: string,
   tabTitle: string,
-  newHeaders: string[]
+  newHeaders: string[],
+  renameMap: Record<string, string> = {}
 ): Promise<TabSyncPlan> {
   const sheets = google.sheets({ version: 'v4', auth: getClient(clientId, clientSecret) });
   const resp = await sheets.spreadsheets.values.get({
@@ -515,12 +529,24 @@ export async function planTabSync(
   const currentHeaders = rows[0] ?? [];
   const dataRows = rows.slice(1);
 
-  const newSet = new Set(newHeaders);
   const curSet = new Set(currentHeaders);
+
+  const renamedColumns: { from: string; to: string }[] = [];
+  const renamedFromSet = new Set<string>();
+  for (const h of newHeaders) {
+    const from = renameMap[h];
+    if (from && from !== h && curSet.has(from) && !curSet.has(h)) {
+      renamedColumns.push({ from, to: h });
+      renamedFromSet.add(from);
+    }
+  }
+
+  const newEffectiveSet = new Set(newHeaders);
+  for (const r of renamedColumns) newEffectiveSet.add(r.from);
 
   const removedColumns = currentHeaders
     .map((name, idx) => ({ name, idx }))
-    .filter((c) => c.name && !newSet.has(c.name))
+    .filter((c) => c.name && !newEffectiveSet.has(c.name) && !renamedFromSet.has(c.name))
     .map((c) => ({
       name: c.name,
       nonEmptyCells: dataRows.filter(
@@ -528,30 +554,43 @@ export async function planTabSync(
       ).length,
     }));
 
-  const addedColumns = newHeaders.filter((h) => !curSet.has(h));
+  const addedColumns = newHeaders.filter(
+    (h) => !curSet.has(h) && !renamedColumns.some((r) => r.to === h)
+  );
 
-  // đổi thứ tự: các cột chung xuất hiện theo trình tự khác nhau
-  const commonCur = currentHeaders.filter((h) => newSet.has(h));
-  const commonNew = newHeaders.filter((h) => curSet.has(h));
-  const reordered = commonCur.join('') !== commonNew.join('');
+  const renameFromToTo = new Map(renamedColumns.map((r) => [r.from, r.to]));
+  const commonCur = currentHeaders
+    .filter((h) => newEffectiveSet.has(h))
+    .map((h) => renameFromToTo.get(h) ?? h);
+  const commonNew = newHeaders.filter(
+    (h) => curSet.has(h) || renamedColumns.some((r) => r.to === h)
+  );
+  const reordered = commonCur.join('~') !== commonNew.join('~');
 
   return {
     currentHeaders,
     newHeaders,
     removedColumns,
     addedColumns,
+    renamedColumns,
     reordered,
     dataRowCount: dataRows.length,
   };
 }
 
-/** Ghi lại toàn bộ tab: cột sắp theo newHeaders, dữ liệu khớp theo tên cột. */
+/**
+ * Ghi lại toàn bộ tab: cột sắp theo newHeaders, dữ liệu khớp theo tên cột.
+ * `renameMap`: newHeader -> oldHeader (xem planTabSync) — với header mới có
+ * mapping này, ưu tiên lấy dữ liệu từ cột TÊN CŨ trên Sheet (đây chính là cột
+ * bị đổi tên, không phải cột mới) thay vì coi là cột trống.
+ */
 export async function applyTabSync(
   clientId: string,
   clientSecret: string,
   spreadsheetId: string,
   tabTitle: string,
-  newHeaders: string[]
+  newHeaders: string[],
+  renameMap: Record<string, string> = {}
 ): Promise<void> {
   const sheets = google.sheets({ version: 'v4', auth: getClient(clientId, clientSecret) });
 
@@ -570,10 +609,13 @@ export async function applyTabSync(
     if (h && !colIdx.has(h)) colIdx.set(h, i);
   });
 
-  // dựng lại từng dòng theo thứ tự newHeaders (cột mới -> rỗng)
+  // dựng lại từng dòng theo thứ tự newHeaders — ưu tiên tra cột theo TÊN CŨ
+  // (renameMap, nếu có) trước khi tra theo chính tên mới, để cột đổi tên vẫn
+  // lấy đúng dữ liệu cũ thay vì bị coi là cột mới trống.
   const rebuilt = dataRows.map((r) =>
     newHeaders.map((h) => {
-      const i = colIdx.get(h);
+      const oldName = renameMap[h];
+      const i = (oldName ? colIdx.get(oldName) : undefined) ?? colIdx.get(h);
       return i === undefined ? '' : r[i] ?? '';
     })
   );

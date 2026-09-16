@@ -128,14 +128,6 @@ QUY TẮC ĐỊNH DẠNG value (bắt buộc, vì value sẽ ghi thẳng vào 1 
   MỌI trường có đơn vị, không tuỳ hứng — cùng 1 loại chỉ số phải luôn có/không
   có đơn vị giống nhau giữa các lần trích xuất.`;
 
-// Model không nên dùng cho bước suy luận (web search) khi hồ sơ có field 'infer':
-// gpt-5* với reasoning_effort tối thiểu cho kết quả web search kém tin cậy hơn
-// hẳn so với gpt-4.1 (khuyến nghị của OpenAI) -> fallback sang gpt-4.1.
-const INFER_FALLBACK_MODEL = 'gpt-4.1';
-function inferModelFor(model: string): string {
-  return /^gpt-5/.test(model) || /^o[0-9]/.test(model) ? INFER_FALLBACK_MODEL : model;
-}
-
 async function extractRaw(
   client: OpenAI,
   pdf: PdfContent,
@@ -168,12 +160,12 @@ async function extractRaw(
   }
 
   // Model reasoning đời 5: chỉ nhận temperature mặc định (1), và mặc định "suy nghĩ"
-  // nhiều -> chậm + tốn token. Task trích xuất đơn giản nên đặt reasoning_effort tối thiểu.
+  // nhiều -> chậm + tốn token. Task trích xuất đơn giản nên đặt reasoning_effort thấp.
   const isReasoning = /^gpt-5/.test(model) || /^o[0-9]/.test(model);
   const resp = await withRateLimitRetry(() =>
     client.chat.completions.create({
       model,
-      ...(isReasoning ? { reasoning_effort: 'minimal' as const } : { temperature: 0 }),
+      ...(isReasoning ? { reasoning_effort: 'low' as const } : { temperature: 0 }),
       messages: [
         { role: 'system', content: SYSTEM_PROMPT },
         { role: 'user', content: userContent },
@@ -553,7 +545,7 @@ export async function aggregateFilter(
     const resp = await withRateLimitRetry(() =>
       client.chat.completions.create({
         model,
-        ...(isReasoning ? { reasoning_effort: 'minimal' as const } : { temperature: 0 }),
+        ...(isReasoning ? { reasoning_effort: 'low' as const } : { temperature: 0 }),
         messages: [
           { role: 'system', content: AGGREGATE_SYSTEM_PROMPT },
           { role: 'user', content: `Chốt giá trị cho các chỉ số sau:\n${fieldList}` },
@@ -630,7 +622,7 @@ export async function extractRecord(
           step1.values,
           fields,
           inferOnly,
-          inferModelFor(model)
+          model
         );
         values = { ...values, ...step2.values };
         notes = { ...notes, ...step2.notes };

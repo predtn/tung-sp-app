@@ -10,6 +10,8 @@ import {
   saveFieldsForTab,
   configuredTabs,
   deleteFieldsForTab,
+  loadSyncedLabels,
+  saveSyncedLabels,
 } from './config';
 import { extractPdf, LONG_FILE_WARNING_PAGES } from './pdf';
 import {
@@ -24,11 +26,12 @@ import {
   hashFile,
   getCached,
   putCached,
+  updateCachedValues,
   clearCache,
   cacheStats,
   peekCache,
 } from './scanCache';
-import type { AppConfig, ExtractedRecord, FieldDef } from './types';
+import type { AppConfig, ExtractedRecord, FieldDef, CellNote } from './types';
 import { finalTabName, isFinalTab, finalColumnLabel } from './tabNaming';
 
 const isDev = !!process.env.VITE_DEV_SERVER_URL;
@@ -136,6 +139,13 @@ function registerIpc() {
     return true;
   });
   ipcMain.handle('fields:get', () => loadFields());
+  // Chỉ SINH KEY ổn định (field mới thêm chưa có key -> "field_N") mà KHÔNG
+  // lưu gì — dùng ở renderer TRƯỚC khi gọi planTabSync/applyTabSync, để cột
+  // Google Sheet và cấu hình local luôn dùng cùng 1 key ngay từ đầu (tránh
+  // syncedLabels bị ghi với key rỗng nếu field vừa thêm chưa qua fields:setForTab).
+  ipcMain.handle('fields:normalize', (_e, fields: FieldDef[]) =>
+    validateFields(fields)
+  );
   ipcMain.handle('fields:set', (_e, fields: FieldDef[]) => {
     const cleaned = validateFields(fields);
     saveFields(cleaned);
@@ -153,6 +163,25 @@ function registerIpc() {
     return true;
   });
 
+  // fieldKey -> label lần đồng bộ Sheet gần nhất, đối chiếu ngược lại thành
+  // "label MỚI hiện tại -> label CŨ trên Sheet" cho field còn tồn tại (chưa bị
+  // xoá khỏi Cài đặt) — dùng để planTabSync/applyTabSync phân biệt "đổi tên
+  // cột" (giữ dữ liệu) với "xoá cột cũ + thêm cột mới" (mất dữ liệu).
+  function buildRenameMap(
+    tabTitle: string,
+    fields: FieldDef[],
+    labelOf: (f: FieldDef) => string
+  ): Record<string, string> {
+    const prevLabels = loadSyncedLabels(tabTitle);
+    const renameMap: Record<string, string> = {};
+    for (const f of fields) {
+      const prev = prevLabels[f.key];
+      const cur = labelOf(f);
+      if (prev && prev !== cur) renameMap[cur] = prev;
+    }
+    return renameMap;
+  }
+
   // Lập kế hoạch đồng bộ cột của tab theo bộ trường (chỉ đọc)
   ipcMain.handle(
     'sheets:planSync',
@@ -161,13 +190,15 @@ function registerIpc() {
       const labelOf = isFinalTab(tabTitle) ? finalColumnLabel : (f: FieldDef) => f.label;
       const headers = fields.map(labelOf);
       headers.push('Thời gian nhập');
+      const renameMap = buildRenameMap(tabTitle, fields, labelOf);
       return gs.withAuth(() =>
         gs.planTabSync(
           cfg.googleClientId,
           cfg.googleClientSecret,
           cfg.spreadsheetId,
           tabTitle,
-          headers
+          headers,
+          renameMap
         )
       );
     }
@@ -216,15 +247,22 @@ function registerIpc() {
       const labelOf = isFinalTab(tabTitle) ? finalColumnLabel : (f: FieldDef) => f.label;
       const headers = fields.map(labelOf);
       headers.push('Thời gian nhập');
+      const renameMap = buildRenameMap(tabTitle, fields, labelOf);
       await gs.withAuth(() =>
         gs.applyTabSync(
           cfg.googleClientId,
           cfg.googleClientSecret,
           cfg.spreadsheetId,
           tabTitle,
-          headers
+          headers,
+          renameMap
         )
       );
+      // Ghi lại ánh xạ fieldKey -> label MỚI, để lần đồng bộ sau nhận ra đúng
+      // field nào đổi tên tiếp theo.
+      const newLabels: Record<string, string> = {};
+      for (const f of fields) newLabels[f.key] = labelOf(f);
+      saveSyncedLabels(tabTitle, newLabels);
       return true;
     }
   );
@@ -246,7 +284,7 @@ function registerIpc() {
       return filePaths.map((p) => ({
         path: p,
         name: path.basename(p),
-        ...peekCache(p, fields),
+        ...peekCache(p, fields, tab),
       }));
     }
   );
@@ -275,7 +313,7 @@ function registerIpc() {
     try {
       const hash = hashFile(filePath);
       if (!forceRescan) {
-        const cached = getCached(hash, fields);
+        const cached = getCached(hash, fields, tab);
         if (cached) {
           return {
             values: cached.values,
@@ -297,7 +335,7 @@ function registerIpc() {
         totalPages: pdf.totalPages,
         isLongFile: pdf.totalPages > LONG_FILE_WARNING_PAGES,
       };
-      putCached(hash, out, fields, cfg.openaiModel);
+      putCached(hash, out, fields, cfg.openaiModel, tab);
       return out;
     } catch (err: any) {
       return blank(err?.message ?? String(err));
@@ -305,24 +343,48 @@ function registerIpc() {
     }
   );
 
+  // Bác sĩ sửa tay 1 hoặc nhiều ô trong bảng review rồi bấm "Lưu cache" —
+  // ghi đè values/notes vào ĐÚNG entry cache của file PDF gốc + tab đang quét
+  // (theo hash nội dung file, không đổi), để lần sau quét lại CÙNG file này ở
+  // CÙNG tab trả về giá trị đã sửa thay vì giá trị AI đọc gốc lúc quét lần
+  // đầu. Không tạo cache mới nếu file chưa từng cache thành công (trả false).
+  ipcMain.handle(
+    'cache:updateValues',
+    async (
+      _e,
+      filePath: string,
+      values: Record<string, string>,
+      notes: Record<string, CellNote>,
+      tab?: string
+    ): Promise<boolean> => {
+      try {
+        const hash = hashFile(filePath);
+        return updateCachedValues(hash, values, notes, tab);
+      } catch {
+        return false;
+      }
+    }
+  );
+
   // Lọc nâng cao bằng AI: gộp mọi trường có aggregateDescription của CÙNG 1
   // bệnh nhân vào 1 lần gọi. Chạy tự động ngay sau khi quét xong toàn bộ lô.
+  // Dùng chung model chính (cfg.openaiModel) với bước trích xuất/suy luận.
   ipcMain.handle(
     'ai:aggregateFilter',
     async (_e, fields: AggregateFilterField[]) => {
       const cfg = loadConfig();
       if (!cfg.openaiApiKey) {
         const values: Record<string, string> = {};
-        const uncertain: Record<string, boolean> = {};
-        const notes: Record<string, string> = {};
+        const notes: Record<string, CellNote> = {};
         for (const f of fields) {
           values[f.key] = INFER_MISSING_DATA_VALUE;
-          uncertain[f.key] = true;
-          notes[f.key] = 'Chưa cấu hình OpenAI API key trong phần Cài đặt.';
+          notes[f.key] = {
+            type: 'missing_info',
+            text: 'Chưa cấu hình OpenAI API key trong phần Cài đặt.',
+          };
         }
         return {
           values,
-          uncertain,
           notes,
           error: 'Chưa cấu hình OpenAI API key trong phần Cài đặt.',
         };
@@ -401,6 +463,11 @@ function registerIpc() {
     );
     // chỉ lưu cấu hình trường của tab sau khi tạo thành công trên Sheet
     saveFieldsForTab(title, fields);
+    // ghi baseline fieldKey -> label ngay từ lúc tạo, để lần đổi tên đầu tiên
+    // (trước khi từng bấm "Đồng bộ") vẫn nhận ra đúng là rename.
+    const initialLabels: Record<string, string> = {};
+    for (const f of fields) initialLabels[f.key] = f.label;
+    saveSyncedLabels(title, initialLabels);
 
     // đồng thời tạo tab "<tên> - final" cùng cấu trúc, dùng để lưu dòng tổng hợp
     // (lọc nâng cao). Cấu hình trường được lưu theo TÊN TAB, nên tab final cũng
@@ -421,6 +488,9 @@ function registerIpc() {
         )
       );
       saveFieldsForTab(finalTitle, fields);
+      const finalInitialLabels: Record<string, string> = {};
+      for (const f of fields) finalInitialLabels[f.key] = finalColumnLabel(f);
+      saveSyncedLabels(finalTitle, finalInitialLabels);
     } catch (err: any) {
       // không chặn tạo tab gốc chỉ vì tab final lỗi -> báo qua console, renderer vẫn coi là thành công
       console.error('Tạo tab final thất bại:', err?.message ?? err);
